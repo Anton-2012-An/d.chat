@@ -3,24 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>D. Chat — Поддержка</title>
+    <title>D. Chat — Портал поддержки</title>
     <style>
         :root {
             --bg: #0f0f11; --surface: #1a1a1d; --surface-hover: #232327;
             --border: #2a2a2e; --text-main: #ededed; --text-muted: #88888d;
             --accent: #6c5ce7; --accent-hover: #5a4bcf;
-            --danger: #ff4757; --success: #2ed573; --radius: 8px;
-            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --danger: #ff4757; --success: #2ed573; --warning: #f39c12;
+            --radius: 8px; --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background-color: var(--bg); color: var(--text-main); font-family: var(--font); line-height: 1.6; }
         a { color: var(--accent); text-decoration: none; cursor: pointer; }
         a:hover { color: var(--accent-hover); }
         
-        .container { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
         header { border-bottom: 1px solid var(--border); padding: 20px 0; margin-bottom: 40px; }
         .header-inner { display: flex; justify-content: space-between; align-items: center; }
-        .logo { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.5px; cursor: pointer; }
+        .logo { font-size: 1.2rem; font-weight: 600; cursor: pointer; }
         nav a { margin-left: 24px; color: var(--text-muted); font-size: 0.9rem; }
         nav a:hover { color: var(--text-main); }
         
@@ -29,13 +29,11 @@
         .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
         .btn-outline:hover { background: var(--surface-hover); }
         .btn-danger { background: var(--danger); }
-        .btn-danger:hover { background: #e04050; }
         .btn-sm { padding: 6px 12px; font-size: 0.85rem; }
         
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
         input, select, textarea { width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-main); font-family: var(--font); margin-bottom: 16px; }
         input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-        label { display: block; margin-bottom: 6px; font-size: 0.9rem; color: var(--text-muted); }
         
         .hero { text-align: center; padding: 60px 0; }
         .hero h1 { font-size: 2.5rem; font-weight: 600; margin-bottom: 16px; }
@@ -52,28 +50,33 @@
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
         .badge-banned { background: rgba(255, 71, 87, 0.1); color: var(--danger); border: 1px solid var(--danger); }
         .badge-active { background: rgba(46, 213, 115, 0.1); color: var(--success); border: 1px solid var(--success); }
+        .badge-role { background: rgba(108, 92, 231, 0.1); color: var(--accent); border: 1px solid var(--accent); margin-right: 4px; }
         
         .admin-layout { display: flex; gap: 24px; }
         .sidebar { width: 250px; flex-shrink: 0; }
-        .sidebar-item { padding: 12px; border-radius: var(--radius); cursor: pointer; color: var(--text-muted); margin-bottom: 8px; }
-        .sidebar-item.active, .sidebar-item:hover { background: var(--surface); color: var(--text-main); }
+        .sidebar-item { padding: 12px; border-radius: var(--radius); cursor: pointer; color: var(--text-muted); margin-bottom: 8px; border: 1px solid transparent; }
+        .sidebar-item.active, .sidebar-item:hover { background: var(--surface); color: var(--text-main); border-color: var(--border); }
         .admin-content { flex-grow: 1; }
         
         .history-item { border-left: 2px solid var(--accent); padding-left: 16px; margin-bottom: 16px; }
         .history-date { font-size: 0.8rem; color: var(--text-muted); }
         .hidden { display: none !important; }
+        
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: var(--surface); padding: 24px; border-radius: var(--radius); width: 100%; max-width: 600px; border: 1px solid var(--border); max-height: 90vh; overflow-y: auto; }
     </style>
 </head>
 <body>
 
     <header>
         <div class="container header-inner">
-            <div class="logo" onclick="navigate('home')">D. Chat Support</div>
+            <div class="logo" onclick="navigate('home')">D. Chat Portal</div>
             <nav id="nav-links"></nav>
         </div>
     </header>
 
     <div class="container" id="app"></div>
+    <div id="modal-container"></div>
 
     <script>
         // === КОНФИГУРАЦИЯ ===
@@ -87,7 +90,6 @@
             const data = await res.json();
             return data.record;
         }
-
         async function updateBin(binId, record) {
             await fetch(`${API_URL}${binId}`, {
                 method: 'PUT',
@@ -115,29 +117,32 @@
             const nav = document.getElementById('nav-links');
             const user = await getCurrentUser();
 
-            // Меню
+            // Навигация
             if (user) {
-                nav.innerHTML = `
-                    <a onclick="navigate('cabinet')">Кабинет</a>
-                    ${user.isAdmin ? '<a onclick="navigate(\'admin\')">Админка</a>' : ''}
-                    <a onclick="logout()">Выйти</a>
-                `;
+                let links = `<a onclick="navigate('faq')">FAQ</a>`;
+                if (user.isAdmin) {
+                    links += `<a onclick="navigate('admin')">Админ-панель</a>`;
+                } else if (user.roles.punisher || user.roles.appealReviewer || user.roles.questionResponder) {
+                    links += `<a onclick="navigate('helper')">Панель помощника</a>`;
+                }
+                links += `<a onclick="navigate('profile')">Личный кабинет</a>`;
+                links += `<a onclick="logout()">Выйти</a>`;
+                nav.innerHTML = links;
             } else {
-                nav.innerHTML = `<a onclick="navigate('home')">Главная</a><a onclick="navigate('login')">Вход / Регистрация</a>`;
+                nav.innerHTML = `<a onclick="navigate('home')">Главная</a><a onclick="navigate('faq')">FAQ</a><a onclick="navigate('login')">Вход / Регистрация</a>`;
             }
 
-            // Страницы
+            // Рендер страниц
             if (page === 'home') {
                 app.innerHTML = `
                     <div class="hero">
-                        <h1>Поддержка D. Chat</h1>
-                        <p>Регистрация, обращения, обжалования — в одном месте.</p>
-                        <button class="btn" onclick="navigate('${user ? 'cabinet' : 'login'}')">${user ? 'Перейти в кабинет' : 'Войти в систему'}</button>
-                    </div>
-                `;
+                        <h1>Портал поддержки D. Chat</h1>
+                        <p>Единая система управления, обжалования и помощи.</p>
+                        <button class="btn" onclick="navigate('${user ? 'profile' : 'login'}')">${user ? 'Личный кабинет' : 'Войти в систему'}</button>
+                    </div>`;
             } 
             else if (page === 'login') {
-                if (user) return navigate('cabinet');
+                if (user) return navigate('profile');
                 app.innerHTML = `
                     <div style="max-width: 400px; margin: 0 auto;">
                         <div class="card" id="reg-card">
@@ -156,16 +161,32 @@
                             <button class="btn" style="width:100%" onclick="doLogin()">Войти</button>
                             <p style="margin-top:16px; text-align:center; font-size:0.9rem;">Нет аккаунта? <a onclick="toggleAuth()">Создать</a></p>
                         </div>
-                    </div>
-                `;
+                    </div>`;
             }
-            else if (page === 'cabinet') {
+            else if (page === 'faq') {
+                app.innerHTML = `
+                    <h2>Частые вопросы (FAQ)</h2>
+                    <div class="card" style="margin-top:20px;">
+                        <h3>Как восстановить доступ?</h3>
+                        <p style="color:var(--text-muted)">Обратитесь к администрации через раздел "Личный кабинет".</p>
+                    </div>
+                    <div class="card">
+                        <h3>Почему меня заблокировали?</h3>
+                        <p style="color:var(--text-muted)">Причину блокировки вы можете увидеть в Личном кабинете. Там же можно подать апелляцию.</p>
+                    </div>`;
+            }
+            else if (page === 'profile') {
                 if (!user) return navigate('login');
-                renderCabinet(user);
+                renderProfile(user);
             }
             else if (page === 'admin') {
                 if (!user || !user.isAdmin) return navigate('home');
-                renderAdmin(user);
+                renderAdminPanel(user);
+            }
+            else if (page === 'helper') {
+                if (!user || user.isAdmin) return navigate('home');
+                if (!user.roles.punisher && !user.roles.appealReviewer && !user.roles.questionResponder) return navigate('home');
+                renderHelperPanel(user);
             }
         }
 
@@ -188,7 +209,6 @@
             const pass = document.getElementById('reg-pass').value;
 
             if (!name || !email || !pass) return alert('Заполните поля');
-
             const usersData = await fetchBin(BIN_USERS);
             if (usersData.users.some(u => u.email === email)) return alert('Email уже занят');
 
@@ -200,13 +220,13 @@
                 id: newId, name, email, telegram: tg, passwordHash: await hashPassword(pass),
                 isAdmin: false, roles: { punisher: false, appealReviewer: false, questionResponder: false },
                 banned: false, ban: null,
-                history: [{ type: 'Регистрация', text: 'Аккаунт создан', date: new Date().toISOString() }]
+                history: [{ type: 'Система', text: 'Аккаунт успешно создан', date: new Date().toISOString() }]
             };
 
             usersData.users.push(newUser);
             await updateBin(BIN_USERS, usersData);
             setSession(newId);
-            navigate('cabinet');
+            navigate('profile');
         }
 
         async function doLogin() {
@@ -219,25 +239,26 @@
             if (user.passwordHash !== await hashPassword(pass)) return alert('Неверный пароль');
 
             setSession(user.id);
-            navigate(user.isAdmin ? 'admin' : 'cabinet');
+            navigate(user.isAdmin ? 'admin' : 'profile');
         }
 
         // === ЛИЧНЫЙ КАБИНЕТ ===
-        function renderCabinet(user) {
+        function renderProfile(user) {
             const app = document.getElementById('app');
             
+            // Блок статуса (Бан)
             let statusHtml = '';
             if (user.banned) {
                 const banTime = new Date(user.ban.issuedAt).getTime();
                 const daysPassed = (Date.now() - banTime) / (1000 * 3600 * 24);
-                
                 let appealHtml = '';
-                if (daysPassed > 3) appealHtml = '<p style="color:var(--text-muted); margin-top:10px;">Срок подачи апелляции истек (прошло более 3 дней).</p>';
-                else if (user.ban.appealSubmitted) appealHtml = '<p style="color:var(--accent); margin-top:10px;">Апелляция находится на рассмотрении.</p>';
+                
+                if (daysPassed > 3) appealHtml = '<p style="color:var(--text-muted); margin-top:10px;">Срок подачи апелляции истек (более 3 дней).</p>';
+                else if (user.ban.appealSubmitted) appealHtml = '<p style="color:var(--accent); margin-top:10px;">Ваша апелляция находится на рассмотрении.</p>';
                 else appealHtml = `
                     <div style="margin-top: 16px;">
-                        <textarea id="appeal-text" placeholder="Опишите причину для разбана..."></textarea>
-                        <button class="btn" onclick="submitAppeal('${user.id}')">Подать апелляцию</button>
+                        <textarea id="appeal-text" placeholder="Объясните, почему вас стоит разбанить..."></textarea>
+                        <button class="btn" onclick="submitAppeal('${user.id}')">Отправить апелляцию</button>
                     </div>`;
 
                 statusHtml = `
@@ -248,9 +269,10 @@
                         ${appealHtml}
                     </div>`;
             } else {
-                statusHtml = `<p style="margin-bottom:16px;">Статус: <span class="badge badge-active">Активен</span></p>`;
+                statusHtml = `<p style="margin-bottom:16px;">Статус аккаунта: <span class="badge badge-active">Активен</span></p>`;
             }
 
+            // История
             const historyHtml = user.history && user.history.length > 0 
                 ? user.history.sort((a,b) => new Date(b.date) - new Date(a.date)).map(h => `
                     <div class="history-item">
@@ -258,7 +280,17 @@
                         <strong>${h.type}</strong>
                         <p>${h.text}</p>
                     </div>`).join('')
-                : '<p style="color:var(--text-muted)">История пуста.</p>';
+                : '<p style="color:var(--text-muted)">Действий пока не было.</p>';
+
+            // Форма вопроса
+            const askQuestionHtml = `
+                <div class="card">
+                    <h3>Задать вопрос поддержке</h3>
+                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Ваш вопрос увидят Ответчики и Администрация.</p>
+                    <textarea id="question-text" placeholder="Напишите ваш вопрос..."></textarea>
+                    <button class="btn btn-sm" onclick="askQuestion('${user.id}')">Отправить</button>
+                </div>
+            `;
 
             app.innerHTML = `
                 <div class="grid-2">
@@ -266,23 +298,40 @@
                         <div class="card">
                             <h2>${user.name}</h2>
                             <p style="color:var(--text-muted); margin-bottom: 16px;">ID: ${user.id}</p>
+                            <div style="margin-bottom:16px;">
+                                ${user.roles.punisher ? '<span class="badge badge-role">Наказатель</span>' : ''}
+                                ${user.roles.appealReviewer ? '<span class="badge badge-role">Обжалователь</span>' : ''}
+                                ${user.roles.questionResponder ? '<span class="badge badge-role">Ответчик</span>' : ''}
+                            </div>
                             ${statusHtml}
                         </div>
+                        ${askQuestionHtml}
                     </div>
                     <div>
                         <div class="card">
-                            <h3>История</h3>
-                            <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Ваши вопросы, наказания и ответы на апелляции.</p>
-                            <div>${historyHtml}</div>
+                            <h3>История и уведомления</h3>
+                            <div style="max-height: 600px; overflow-y: auto; margin-top:16px;">${historyHtml}</div>
                         </div>
                     </div>
                 </div>
             `;
         }
 
+        async function askQuestion(userId) {
+            const text = document.getElementById('question-text').value;
+            if (!text) return alert('Введите вопрос');
+            const usersData = await fetchBin(BIN_USERS);
+            const u = usersData.users.find(x => x.id === userId);
+            
+            u.history.push({ type: 'Вопрос', text: text, date: new Date().toISOString() });
+            await updateBin(BIN_USERS, usersData);
+            alert('Вопрос отправлен!');
+            navigate('profile');
+        }
+
         async function submitAppeal(userId) {
             const text = document.getElementById('appeal-text').value;
-            if (!text) return alert('Введите текст');
+            if (!text) return alert('Опишите причину');
             
             const usersData = await fetchBin(BIN_USERS);
             const u = usersData.users.find(x => x.id === userId);
@@ -291,14 +340,13 @@
             u.history.push({ type: 'Апелляция', text: text, date: new Date().toISOString() });
             
             await updateBin(BIN_USERS, usersData);
-            alert('Апелляция подана');
-            navigate('cabinet');
+            alert('Апелляция успешно подана.');
+            navigate('profile');
         }
 
-        // === АДМИНКА ===
+        // === АДМИН ПАНЕЛЬ (ГЛАВНЫЙ) ===
         let cachedUsers = null;
-
-        async function renderAdmin(adminUser) {
+        async function renderAdminPanel(adminUser) {
             const app = document.getElementById('app');
             const usersData = await fetchBin(BIN_USERS);
             cachedUsers = usersData.users;
@@ -307,7 +355,10 @@
                 <div class="admin-layout">
                     <div class="sidebar">
                         <div class="sidebar-item active" onclick="loadAdminTab('users', this)">Пользователи</div>
-                        <div class="sidebar-item" onclick="loadAdminTab('appeals', this)">Апелляции</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('banned', this)">Список наказанных</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('roles', this)">Все работники</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('logs', this)">Действия помощников</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('questions', this)">Вопросы</div>
                     </div>
                     <div class="admin-content" id="admin-content"></div>
                 </div>
@@ -325,35 +376,309 @@
 
             if (tab === 'users') {
                 content.innerHTML = `
-                    <h2>Пользователи</h2>
+                    <h2>Список всех пользователей</h2>
                     <table>
-                        <tr><th>ID</th><th>Имя</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
+                        <tr><th>ID</th><th>Имя</th><th>Telegram</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
                         ${users.map(u => `
                             <tr>
                                 <td>${u.id}</td>
                                 <td>${u.name}</td>
+                                <td>${u.telegram || '-'}</td>
                                 <td>${getRoles(u.roles)}</td>
                                 <td>${u.banned ? '<span class="badge badge-banned">Забанен</span>' : '<span class="badge badge-active">Активен</span>'}</td>
-                                <td><button class="btn btn-sm btn-outline" onclick="adminAction('${u.id}')">Управление</button></td>
+                                <td><button class="btn btn-sm btn-outline" onclick="openAdminModal('${u.id}')">Управление</button></td>
                             </tr>
                         `).join('')}
                     </table>
                 `;
-            } else if (tab === 'appeals') {
-                const appeals = users.filter(u => u.banned && u.ban.appealSubmitted);
+            } 
+            else if (tab === 'banned') {
+                const banned = users.filter(u => u.banned);
                 content.innerHTML = `
-                    <h2>Апелляции</h2>
-                    ${appeals.length === 0 ? '<p>Нет активных апелляций.</p>' : appeals.map(u => `
-                        <div class="card">
-                            <p><strong>${u.name}</strong> (ID: ${u.id})</p>
-                            <p>Причина бана: ${u.ban.reason}</p>
-                            <p style="margin:10px 0; color:var(--accent)">"${u.ban.appealText}"</p>
-                            <button class="btn btn-sm btn-outline" onclick="resolveAppeal('${u.id}', true)">Разбанить</button>
-                            <button class="btn btn-sm btn-danger" onclick="resolveAppeal('${u.id}', false)">Отклонить</button>
+                    <h2>Список наказанных</h2>
+                    ${banned.length === 0 ? '<p>Забаненных нет.</p>' : `
+                    <table>
+                        <tr><th>ID</th><th>Имя</th><th>Причина</th><th>До</th><th>Апелляция</th><th>Действия</th></tr>
+                        ${banned.map(u => `
+                            <tr>
+                                <td>${u.id}</td>
+                                <td>${u.name}</td>
+                                <td>${u.ban.reason}</td>
+                                <td>${new Date(u.ban.until).toLocaleString()}</td>
+                                <td>${u.ban.appealSubmitted ? '<span style="color:var(--warning)">Ждет ответа</span>' : 'Нет'}</td>
+                                <td><button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить</button></td>
+                            </tr>
+                        `).join('')}
+                    </table>`}
+                `;
+            }
+            else if (tab === 'roles') {
+                const workers = users.filter(u => u.roles.punisher || u.roles.appealReviewer || u.roles.questionResponder);
+                content.innerHTML = `
+                    <h2>Все работники</h2>
+                    ${workers.length === 0 ? '<p>Работников пока нет.</p>' : `
+                    <table>
+                        <tr><th>ID</th><th>Имя</th><th>Должности</th><th>Действия</th></tr>
+                        ${workers.map(u => `
+                            <tr>
+                                <td>${u.id}</td>
+                                <td>${u.name}</td>
+                                <td>${getRoles(u.roles)}</td>
+                                <td><button class="btn btn-sm btn-outline" onclick="openAdminModal('${u.id}')">Изменить права</button></td>
+                            </tr>
+                        `).join('')}
+                    </table>`}
+                `;
+            }
+            else if (tab === 'logs') {
+                let allActions = [];
+                users.forEach(u => {
+                    if(u.history) {
+                        u.history.forEach(h => {
+                            if (h.type.includes('Бан') || h.type.includes('Апелляция') || h.type.includes('Роль') || h.type.includes('Ответ')) {
+                                allActions.push({ ...h, userName: u.name, userId: u.id });
+                            }
+                        });
+                    }
+                });
+                allActions.sort((a,b) => new Date(b.date) - new Date(a.date));
+                content.innerHTML = `
+                    <h2>Действия помощников</h2>
+                    ${allActions.length === 0 ? '<p>Действий пока нет.</p>' : allActions.map(a => `
+                        <div class="history-item">
+                            <div class="history-date">${new Date(a.date).toLocaleString()} | Пользователь: ${a.userName} (${a.userId})</div>
+                            <strong>${a.type}</strong>
+                            <p>${a.text}</p>
                         </div>
                     `).join('')}
                 `;
             }
+            else if (tab === 'questions') {
+                let questions = [];
+                users.forEach(u => {
+                    if(u.history) {
+                        u.history.forEach(h => {
+                            if (h.type.includes('Вопрос')) questions.push({ ...h, userName: u.name, userId: u.id });
+                        });
+                    }
+                });
+                questions.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+                content.innerHTML = `
+                    <h2>Все вопросы от пользователей</h2>
+                    ${questions.length === 0 ? '<p>Вопросов нет.</p>' : questions.map(q => `
+                        <div class="card">
+                            <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName} (${q.userId})</p>
+                            <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
+                            <textarea id="ans-${q.userId}-${new Date(q.date).getTime()}" placeholder="Ваш ответ..."></textarea>
+                            <button class="btn btn-sm" onclick="adminAnswer('${q.userId}', 'ans-${q.userId}-${new Date(q.date).getTime()}')">Ответить</button>
+                        </div>
+                    `).join('')}
+                `;
+            }
+        }
+
+        async function adminAnswer(userId, inputId) {
+            const answer = document.getElementById(inputId).value;
+            if (!answer) return;
+            const u = cachedUsers.find(x => x.id === userId);
+            u.history.push({ type: 'Ответ поддержки', text: answer, date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Ответ отправлен!');
+            loadAdminTab('questions');
+        }
+
+        function openAdminModal(userId) {
+            const u = cachedUsers.find(x => x.id === userId);
+            const modal = document.getElementById('modal-container');
+            modal.innerHTML = `
+                <div class="modal" onclick="if(event.target===this) closeModal()">
+                    <div class="modal-content">
+                        <h2>${u.name} (${u.id})</h2>
+                        <p style="margin-bottom:16px;">Статус: ${u.banned ? '<span style="color:var(--danger)">Забанен</span>' : '<span style="color:var(--success)">Активен</span>'}</p>
+                        
+                        <h4>Выдать/снять должности:</h4>
+                        <div style="margin-bottom:16px;">
+                            <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-punisher" ${u.roles.punisher ? 'checked' : ''}> Наказатель</label>
+                            <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-reviewer" ${u.roles.appealReviewer ? 'checked' : ''}> Обжалователь</label>
+                            <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-responder" ${u.roles.questionResponder ? 'checked' : ''}> Ответчик</label>
+                        </div>
+
+                        <h4>Наказания:</h4>
+                        ${u.banned ? `
+                            <p>Причина: ${u.ban.reason}</p>
+                            <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить досрочно</button>
+                        ` : `
+                            <button class="btn btn-sm btn-danger" onclick="adminBan('${u.id}')">Забанить</button>
+                        `}
+
+                        <div style="margin-top:24px; display:flex; gap:10px;">
+                            <button class="btn" onclick="saveRoles('${u.id}')">Сохранить роли</button>
+                            <button class="btn btn-outline" onclick="closeModal()">Закрыть</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function saveRoles(userId) {
+            const u = cachedUsers.find(x => x.id === userId);
+            const p = document.getElementById('role-punisher').checked;
+            const r = document.getElementById('role-reviewer').checked;
+            const res = document.getElementById('role-responder').checked;
+            u.roles = { punisher: p, appealReviewer: r, questionResponder: res };
+            u.history.push({ type: 'Система', text: 'Изменены должности пользователя.', date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            closeModal(); navigate('admin');
+        }
+
+        function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+
+        async function adminBan(userId) {
+            const reason = prompt('Причина бана:');
+            const days = prompt('Срок (дней):', '7');
+            if (!reason || !days) return;
+            const u = cachedUsers.find(x => x.id === userId);
+            const until = new Date(); until.setDate(until.getDate() + parseInt(days));
+            u.banned = true;
+            u.ban = { reason, issuedAt: new Date().toISOString(), until: until.toISOString(), appealSubmitted: false };
+            u.history.push({ type: 'Бан', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            closeModal(); navigate('admin');
+        }
+
+        async function adminUnban(userId) {
+            const u = cachedUsers.find(x => x.id === userId);
+            u.banned = false;
+            if(u.ban) u.ban.appealSubmitted = false;
+            u.history.push({ type: 'Разбан', text: 'Снят администратором досрочно.', date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            closeModal(); navigate('admin');
+        }
+
+        // === ПАНЕЛЬ ПОМОЩНИКА ===
+        async function renderHelperPanel(user) {
+            const app = document.getElementById('app');
+            const usersData = await fetchBin(BIN_USERS);
+            cachedUsers = usersData.users;
+
+            let sidebarHtml = '';
+            if (user.roles.appealReviewer) sidebarHtml += `<div class="sidebar-item active" onclick="loadHelperTab('appeals', this)">Апелляции</div>`;
+            if (user.roles.punisher) sidebarHtml += `<div class="sidebar-item" onclick="loadHelperTab('users', this)">Выдать бан</div>`;
+            if (user.roles.questionResponder) sidebarHtml += `<div class="sidebar-item" onclick="loadHelperTab('questions', this)">Вопросы</div>`;
+
+            app.innerHTML = `
+                <div class="admin-layout">
+                    <div class="sidebar">${sidebarHtml}</div>
+                    <div class="admin-content" id="helper-content"></div>
+                </div>
+            `;
+            
+            // Загружаем первую доступную вкладку
+            if (user.roles.appealReviewer) loadHelperTab('appeals');
+            else if (user.roles.punisher) loadHelperTab('users');
+            else if (user.roles.questionResponder) loadHelperTab('questions');
+        }
+
+        function loadHelperTab(tab, el = null) {
+            if (el) {
+                document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+                el.classList.add('active');
+            }
+            const content = document.getElementById('helper-content');
+            const users = cachedUsers.filter(u => !u.isAdmin);
+
+            if (tab === 'appeals') {
+                const appeals = users.filter(u => u.banned && u.ban && u.ban.appealSubmitted);
+                content.innerHTML = `
+                    <h2>Обжалования наказаний</h2>
+                    ${appeals.length === 0 ? '<p>Нет активных апелляций.</p>' : appeals.map(u => `
+                        <div class="card">
+                            <p><strong>${u.name}</strong> (ID: ${u.id})</p>
+                            <p>Причина бана: ${u.ban.reason}</p>
+                            <p style="margin:10px 0; color:var(--warning)">"${u.ban.appealText}"</p>
+                            <button class="btn btn-sm btn-outline" onclick="helperResolveAppeal('${u.id}', true)">Разбанить</button>
+                            <button class="btn btn-sm btn-danger" onclick="helperResolveAppeal('${u.id}', false)">Отклонить</button>
+                        </div>
+                    `).join('')}
+                `;
+            } 
+            else if (tab === 'users') {
+                content.innerHTML = `
+                    <h2>Выдача наказаний</h2>
+                    <table>
+                        <tr><th>ID</th><th>Имя</th><th>Статус</th><th>Действие</th></tr>
+                        ${users.map(u => `
+                            <tr>
+                                <td>${u.id}</td><td>${u.name}</td>
+                                <td>${u.banned ? '<span class="badge badge-banned">Забанен</span>' : '<span class="badge badge-active">Активен</span>'}</td>
+                                <td>${!u.banned ? `<button class="btn btn-sm btn-danger" onclick="helperBan('${u.id}')">Забанить</button>` : '-'}</td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                `;
+            }
+            else if (tab === 'questions') {
+                let questions = [];
+                users.forEach(u => {
+                    if(u.history) {
+                        u.history.forEach(h => {
+                            if (h.type.includes('Вопрос')) questions.push({ ...h, userName: u.name, userId: u.id });
+                        });
+                    }
+                });
+                questions.sort((a,b) => new Date(b.date) - new Date(a.date));
+
+                content.innerHTML = `
+                    <h2>Вопросы от пользователей</h2>
+                    ${questions.length === 0 ? '<p>Вопросов нет.</p>' : questions.map(q => `
+                        <div class="card">
+                            <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName} (${q.userId})</p>
+                            <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
+                            <textarea id="ans-h-${q.userId}-${new Date(q.date).getTime()}" placeholder="Ваш ответ..."></textarea>
+                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-h-${q.userId}-${new Date(q.date).getTime()}')">Ответить</button>
+                        </div>
+                    `).join('')}
+                `;
+            }
+        }
+
+        async function helperAnswer(userId, inputId) {
+            const answer = document.getElementById(inputId).value;
+            if (!answer) return;
+            const u = cachedUsers.find(x => x.id === userId);
+            u.history.push({ type: 'Ответ поддержки', text: answer, date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Ответ отправлен!');
+            navigate('helper');
+        }
+
+        async function helperResolveAppeal(userId, isUnban) {
+            const u = cachedUsers.find(x => x.id === userId);
+            if (isUnban) {
+                u.banned = false;
+                u.history.push({ type: 'Апелляция (Помощник)', text: 'Одобрено. Пользователь разбанен.', date: new Date().toISOString() });
+            } else {
+                u.history.push({ type: 'Апелляция (Помощник)', text: 'Отклонено. Бан оставлен в силе.', date: new Date().toISOString() });
+            }
+            if(u.ban) u.ban.appealSubmitted = false;
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Решение принято');
+            navigate('helper');
+        }
+
+        async function helperBan(userId) {
+            const reason = prompt('Причина бана:');
+            const days = prompt('Срок (дней):', '7');
+            if (!reason || !days) return;
+            const u = cachedUsers.find(x => x.id === userId);
+            const until = new Date(); until.setDate(until.getDate() + parseInt(days));
+            u.banned = true;
+            u.ban = { reason, issuedAt: new Date().toISOString(), until: until.toISOString(), appealSubmitted: false };
+            u.history.push({ type: 'Бан (Помощник)', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Пользователь забанен');
+            navigate('helper');
         }
 
         function getRoles(roles) {
@@ -364,57 +689,6 @@
             return r.length ? r.join(', ') : 'Пользователь';
         }
 
-        async function adminAction(userId) {
-            const u = cachedUsers.find(x => x.id === userId);
-            const act = prompt(`Пользователь: ${u.name}\n\n1. Выдать/снять роль\n2. Забанить\n3. Разбанить\n4. История\n\nВведите номер:`);
-            
-            if (act === '1') {
-                const role = prompt('Введите роль: punisher (Наказатель), reviewer (Обжалователь), responder (Ответчик)');
-                if (role === 'punisher') u.roles.punisher = !u.roles.punisher;
-                else if (role === 'reviewer') u.roles.appealReviewer = !u.roles.appealReviewer;
-                else if (role === 'responder') u.roles.questionResponder = !u.roles.questionResponder;
-                await saveAdminAction();
-            } 
-            else if (act === '2') {
-                const reason = prompt('Причина бана:');
-                const days = prompt('На сколько дней?', '7');
-                if (!reason || !days) return;
-                const until = new Date(); until.setDate(until.getDate() + parseInt(days));
-                u.banned = true;
-                u.ban = { reason, issuedAt: new Date().toISOString(), until: until.toISOString(), appealSubmitted: false };
-                u.history.push({ type: 'Бан', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
-                await saveAdminAction();
-            }
-            else if (act === '3') {
-                u.banned = false;
-                u.ban.appealSubmitted = false;
-                u.history.push({ type: 'Разбан', text: 'Снят администратором.', date: new Date().toISOString() });
-                await saveAdminAction();
-            }
-            else if (act === '4') {
-                alert(u.history.map(h => `[${new Date(h.date).toLocaleDateString()}] ${h.type}: ${h.text}`).join('\n\n'));
-            }
-        }
-
-        async function resolveAppeal(userId, isUnban) {
-            const u = cachedUsers.find(x => x.id === userId);
-            if (isUnban) {
-                u.banned = false;
-                u.history.push({ type: 'Апелляция одобрена', text: 'Разбанен.', date: new Date().toISOString() });
-            } else {
-                u.history.push({ type: 'Апелляция отклонена', text: 'Бан оставлен в силе.', date: new Date().toISOString() });
-            }
-            u.ban.appealSubmitted = false;
-            await saveAdminAction();
-            loadAdminTab('appeals');
-        }
-
-        async function saveAdminAction() {
-            await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Сохранено');
-        }
-
-        // === СТАРТ ===
         window.onload = () => navigate('home');
     </script>
 </body>
