@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D. Chat — Поддержка</title>
+    <style>
+        :root {
+            --bg: #0f0f11; --surface: #1a1a1d; --surface-hover: #232327;
+            --border: #2a2a2e; --text-main: #ededed; --text-muted: #88888d;
+            --accent: #6c5ce7; --accent-hover: #5a4bcf;
+            --danger: #ff4757; --success: #2ed573; --radius: 8px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background-color: var(--bg); color: var(--text-main); font-family: var(--font); line-height: 1.6; }
+        a { color: var(--accent); text-decoration: none; cursor: pointer; }
+        a:hover { color: var(--accent-hover); }
+        
+        .container { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+        header { border-bottom: 1px solid var(--border); padding: 20px 0; margin-bottom: 40px; }
+        .header-inner { display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 1.2rem; font-weight: 600; letter-spacing: 0.5px; cursor: pointer; }
+        nav a { margin-left: 24px; color: var(--text-muted); font-size: 0.9rem; }
+        nav a:hover { color: var(--text-main); }
+        
+        .btn { display: inline-block; background: var(--accent); color: #fff; padding: 10px 20px; border-radius: var(--radius); border: none; cursor: pointer; font-size: 0.95rem; font-weight: 500; transition: all 0.2s; text-align: center; }
+        .btn:hover { background: var(--accent-hover); color: #fff; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+        .btn-outline:hover { background: var(--surface-hover); }
+        .btn-danger { background: var(--danger); }
+        .btn-danger:hover { background: #e04050; }
+        .btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+        
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
+        input, select, textarea { width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-main); font-family: var(--font); margin-bottom: 16px; }
+        input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+        label { display: block; margin-bottom: 6px; font-size: 0.9rem; color: var(--text-muted); }
+        
+        .hero { text-align: center; padding: 60px 0; }
+        .hero h1 { font-size: 2.5rem; font-weight: 600; margin-bottom: 16px; }
+        .hero p { color: var(--text-muted); font-size: 1.1rem; margin-bottom: 32px; }
+        
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        th { color: var(--text-muted); font-weight: 500; }
+        tr:hover td { background: var(--surface-hover); }
+        
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+        .badge-banned { background: rgba(255, 71, 87, 0.1); color: var(--danger); border: 1px solid var(--danger); }
+        .badge-active { background: rgba(46, 213, 115, 0.1); color: var(--success); border: 1px solid var(--success); }
+        
+        .admin-layout { display: flex; gap: 24px; }
+        .sidebar { width: 250px; flex-shrink: 0; }
+        .sidebar-item { padding: 12px; border-radius: var(--radius); cursor: pointer; color: var(--text-muted); margin-bottom: 8px; }
+        .sidebar-item.active, .sidebar-item:hover { background: var(--surface); color: var(--text-main); }
+        .admin-content { flex-grow: 1; }
+        
+        .history-item { border-left: 2px solid var(--accent); padding-left: 16px; margin-bottom: 16px; }
+        .history-date { font-size: 0.8rem; color: var(--text-muted); }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="container header-inner">
+            <div class="logo" onclick="navigate('home')">D. Chat Support</div>
+            <nav id="nav-links"></nav>
+        </div>
+    </header>
+
+    <div class="container" id="app"></div>
+
+    <script>
+        // === КОНФИГУРАЦИЯ ===
+        const BIN_USERS = '6aef1ed1ac6210605a7531df';
+        const ACCESS_KEY = '$2a$10$m6buwMc4zT9yYS4PFllPleBYLMtcfupWSsXMe4/521Wo3fVKR4FdS';
+        const API_URL = 'https://api.jsonbin.io/v3/b/';
+
+        // === API ===
+        async function fetchBin(binId) {
+            const res = await fetch(`${API_URL}${binId}/latest`, { headers: { 'X-Access-Key': ACCESS_KEY } });
+            const data = await res.json();
+            return data.record;
+        }
+
+        async function updateBin(binId, record) {
+            await fetch(`${API_URL}${binId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-Access-Key': ACCESS_KEY },
+                body: JSON.stringify(record)
+            });
+        }
+
+        // === АВТОРИЗАЦИЯ ===
+        function getSession() { return JSON.parse(localStorage.getItem('dchat_session')); }
+        function setSession(userId) { localStorage.setItem('dchat_session', JSON.stringify({ userId })); }
+        function logout() { localStorage.removeItem('dchat_session'); navigate('home'); }
+
+        async function getCurrentUser() {
+            const session = getSession();
+            if (!session) return null;
+            const usersData = await fetchBin(BIN_USERS);
+            if (!usersData || !usersData.users) return null;
+            return usersData.users.find(u => u.id === session.userId);
+        }
+
+        // === РОУТИНГ ===
+        async function navigate(page) {
+            const app = document.getElementById('app');
+            const nav = document.getElementById('nav-links');
+            const user = await getCurrentUser();
+
+            // Меню
+            if (user) {
+                nav.innerHTML = `
+                    <a onclick="navigate('cabinet')">Кабинет</a>
+                    ${user.isAdmin ? '<a onclick="navigate(\'admin\')">Админка</a>' : ''}
+                    <a onclick="logout()">Выйти</a>
+                `;
+            } else {
+                nav.innerHTML = `<a onclick="navigate('home')">Главная</a><a onclick="navigate('login')">Вход / Регистрация</a>`;
+            }
+
+            // Страницы
+            if (page === 'home') {
+                app.innerHTML = `
+                    <div class="hero">
+                        <h1>Поддержка D. Chat</h1>
+                        <p>Регистрация, обращения, обжалования — в одном месте.</p>
+                        <button class="btn" onclick="navigate('${user ? 'cabinet' : 'login'}')">${user ? 'Перейти в кабинет' : 'Войти в систему'}</button>
+                    </div>
+                `;
+            } 
+            else if (page === 'login') {
+                if (user) return navigate('cabinet');
+                app.innerHTML = `
+                    <div style="max-width: 400px; margin: 0 auto;">
+                        <div class="card" id="reg-card">
+                            <h2 style="margin-bottom:20px;">Регистрация</h2>
+                            <input type="text" id="reg-name" placeholder="Имя">
+                            <input type="email" id="reg-email" placeholder="Email">
+                            <input type="text" id="reg-tg" placeholder="Telegram (необязательно)">
+                            <input type="password" id="reg-pass" placeholder="Пароль">
+                            <button class="btn" style="width:100%" onclick="doRegister()">Создать аккаунт</button>
+                            <p style="margin-top:16px; text-align:center; font-size:0.9rem;">Уже есть аккаунт? <a onclick="toggleAuth()">Войти</a></p>
+                        </div>
+                        <div class="card hidden" id="log-card">
+                            <h2 style="margin-bottom:20px;">Вход</h2>
+                            <input type="email" id="log-email" placeholder="Email">
+                            <input type="password" id="log-pass" placeholder="Пароль">
+                            <button class="btn" style="width:100%" onclick="doLogin()">Войти</button>
+                            <p style="margin-top:16px; text-align:center; font-size:0.9rem;">Нет аккаунта? <a onclick="toggleAuth()">Создать</a></p>
+                        </div>
+                    </div>
+                `;
+            }
+            else if (page === 'cabinet') {
+                if (!user) return navigate('login');
+                renderCabinet(user);
+            }
+            else if (page === 'admin') {
+                if (!user || !user.isAdmin) return navigate('home');
+                renderAdmin(user);
+            }
+        }
+
+        function toggleAuth() {
+            document.getElementById('reg-card').classList.toggle('hidden');
+            document.getElementById('log-card').classList.toggle('hidden');
+        }
+
+        // === РЕГИСТРАЦИЯ И ВХОД ===
+        async function hashPassword(pass) {
+            const msgBuffer = new TextEncoder().encode(pass);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async function doRegister() {
+            const name = document.getElementById('reg-name').value;
+            const email = document.getElementById('reg-email').value;
+            const tg = document.getElementById('reg-tg').value;
+            const pass = document.getElementById('reg-pass').value;
+
+            if (!name || !email || !pass) return alert('Заполните поля');
+
+            const usersData = await fetchBin(BIN_USERS);
+            if (usersData.users.some(u => u.email === email)) return alert('Email уже занят');
+
+            let newId;
+            do { newId = Math.floor(100000 + Math.random() * 900000).toString(); } 
+            while (usersData.users.some(u => u.id === newId));
+
+            const newUser = {
+                id: newId, name, email, telegram: tg, passwordHash: await hashPassword(pass),
+                isAdmin: false, roles: { punisher: false, appealReviewer: false, questionResponder: false },
+                banned: false, ban: null,
+                history: [{ type: 'Регистрация', text: 'Аккаунт создан', date: new Date().toISOString() }]
+            };
+
+            usersData.users.push(newUser);
+            await updateBin(BIN_USERS, usersData);
+            setSession(newId);
+            navigate('cabinet');
+        }
+
+        async function doLogin() {
+            const email = document.getElementById('log-email').value;
+            const pass = document.getElementById('log-pass').value;
+            const usersData = await fetchBin(BIN_USERS);
+            const user = usersData.users.find(u => u.email === email);
+
+            if (!user) return alert('Пользователь не найден');
+            if (user.passwordHash !== await hashPassword(pass)) return alert('Неверный пароль');
+
+            setSession(user.id);
+            navigate(user.isAdmin ? 'admin' : 'cabinet');
+        }
+
+        // === ЛИЧНЫЙ КАБИНЕТ ===
+        function renderCabinet(user) {
+            const app = document.getElementById('app');
+            
+            let statusHtml = '';
+            if (user.banned) {
+                const banTime = new Date(user.ban.issuedAt).getTime();
+                const daysPassed = (Date.now() - banTime) / (1000 * 3600 * 24);
+                
+                let appealHtml = '';
+                if (daysPassed > 3) appealHtml = '<p style="color:var(--text-muted); margin-top:10px;">Срок подачи апелляции истек (прошло более 3 дней).</p>';
+                else if (user.ban.appealSubmitted) appealHtml = '<p style="color:var(--accent); margin-top:10px;">Апелляция находится на рассмотрении.</p>';
+                else appealHtml = `
+                    <div style="margin-top: 16px;">
+                        <textarea id="appeal-text" placeholder="Опишите причину для разбана..."></textarea>
+                        <button class="btn" onclick="submitAppeal('${user.id}')">Подать апелляцию</button>
+                    </div>`;
+
+                statusHtml = `
+                    <div class="card" style="border-color: var(--danger)">
+                        <h3 style="color: var(--danger)">Вы забанены</h3>
+                        <p><strong>Причина:</strong> ${user.ban.reason}</p>
+                        <p><strong>До:</strong> ${new Date(user.ban.until).toLocaleString()}</p>
+                        ${appealHtml}
+                    </div>`;
+            } else {
+                statusHtml = `<p style="margin-bottom:16px;">Статус: <span class="badge badge-active">Активен</span></p>`;
+            }
+
+            const historyHtml = user.history && user.history.length > 0 
+                ? user.history.sort((a,b) => new Date(b.date) - new Date(a.date)).map(h => `
+                    <div class="history-item">
+                        <div class="history-date">${new Date(h.date).toLocaleString()}</div>
+                        <strong>${h.type}</strong>
+                        <p>${h.text}</p>
+                    </div>`).join('')
+                : '<p style="color:var(--text-muted)">История пуста.</p>';
+
+            app.innerHTML = `
+                <div class="grid-2">
+                    <div>
+                        <div class="card">
+                            <h2>${user.name}</h2>
+                            <p style="color:var(--text-muted); margin-bottom: 16px;">ID: ${user.id}</p>
+                            ${statusHtml}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="card">
+                            <h3>История</h3>
+                            <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Ваши вопросы, наказания и ответы на апелляции.</p>
+                            <div>${historyHtml}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function submitAppeal(userId) {
+            const text = document.getElementById('appeal-text').value;
+            if (!text) return alert('Введите текст');
+            
+            const usersData = await fetchBin(BIN_USERS);
+            const u = usersData.users.find(x => x.id === userId);
+            u.ban.appealSubmitted = true;
+            u.ban.appealText = text;
+            u.history.push({ type: 'Апелляция', text: text, date: new Date().toISOString() });
+            
+            await updateBin(BIN_USERS, usersData);
+            alert('Апелляция подана');
+            navigate('cabinet');
+        }
+
+        // === АДМИНКА ===
+        let cachedUsers = null;
+
+        async function renderAdmin(adminUser) {
+            const app = document.getElementById('app');
+            const usersData = await fetchBin(BIN_USERS);
+            cachedUsers = usersData.users;
+
+            app.innerHTML = `
+                <div class="admin-layout">
+                    <div class="sidebar">
+                        <div class="sidebar-item active" onclick="loadAdminTab('users', this)">Пользователи</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('appeals', this)">Апелляции</div>
+                    </div>
+                    <div class="admin-content" id="admin-content"></div>
+                </div>
+            `;
+            loadAdminTab('users');
+        }
+
+        function loadAdminTab(tab, el = null) {
+            if (el) {
+                document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+                el.classList.add('active');
+            }
+            const content = document.getElementById('admin-content');
+            const users = cachedUsers.filter(u => !u.isAdmin);
+
+            if (tab === 'users') {
+                content.innerHTML = `
+                    <h2>Пользователи</h2>
+                    <table>
+                        <tr><th>ID</th><th>Имя</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
+                        ${users.map(u => `
+                            <tr>
+                                <td>${u.id}</td>
+                                <td>${u.name}</td>
+                                <td>${getRoles(u.roles)}</td>
+                                <td>${u.banned ? '<span class="badge badge-banned">Забанен</span>' : '<span class="badge badge-active">Активен</span>'}</td>
+                                <td><button class="btn btn-sm btn-outline" onclick="adminAction('${u.id}')">Управление</button></td>
+                            </tr>
+                        `).join('')}
+                    </table>
+                `;
+            } else if (tab === 'appeals') {
+                const appeals = users.filter(u => u.banned && u.ban.appealSubmitted);
+                content.innerHTML = `
+                    <h2>Апелляции</h2>
+                    ${appeals.length === 0 ? '<p>Нет активных апелляций.</p>' : appeals.map(u => `
+                        <div class="card">
+                            <p><strong>${u.name}</strong> (ID: ${u.id})</p>
+                            <p>Причина бана: ${u.ban.reason}</p>
+                            <p style="margin:10px 0; color:var(--accent)">"${u.ban.appealText}"</p>
+                            <button class="btn btn-sm btn-outline" onclick="resolveAppeal('${u.id}', true)">Разбанить</button>
+                            <button class="btn btn-sm btn-danger" onclick="resolveAppeal('${u.id}', false)">Отклонить</button>
+                        </div>
+                    `).join('')}
+                `;
+            }
+        }
+
+        function getRoles(roles) {
+            let r = [];
+            if (roles.punisher) r.push('Наказатель');
+            if (roles.appealReviewer) r.push('Обжалователь');
+            if (roles.questionResponder) r.push('Ответчик');
+            return r.length ? r.join(', ') : 'Пользователь';
+        }
+
+        async function adminAction(userId) {
+            const u = cachedUsers.find(x => x.id === userId);
+            const act = prompt(`Пользователь: ${u.name}\n\n1. Выдать/снять роль\n2. Забанить\n3. Разбанить\n4. История\n\nВведите номер:`);
+            
+            if (act === '1') {
+                const role = prompt('Введите роль: punisher (Наказатель), reviewer (Обжалователь), responder (Ответчик)');
+                if (role === 'punisher') u.roles.punisher = !u.roles.punisher;
+                else if (role === 'reviewer') u.roles.appealReviewer = !u.roles.appealReviewer;
+                else if (role === 'responder') u.roles.questionResponder = !u.roles.questionResponder;
+                await saveAdminAction();
+            } 
+            else if (act === '2') {
+                const reason = prompt('Причина бана:');
+                const days = prompt('На сколько дней?', '7');
+                if (!reason || !days) return;
+                const until = new Date(); until.setDate(until.getDate() + parseInt(days));
+                u.banned = true;
+                u.ban = { reason, issuedAt: new Date().toISOString(), until: until.toISOString(), appealSubmitted: false };
+                u.history.push({ type: 'Бан', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
+                await saveAdminAction();
+            }
+            else if (act === '3') {
+                u.banned = false;
+                u.ban.appealSubmitted = false;
+                u.history.push({ type: 'Разбан', text: 'Снят администратором.', date: new Date().toISOString() });
+                await saveAdminAction();
+            }
+            else if (act === '4') {
+                alert(u.history.map(h => `[${new Date(h.date).toLocaleDateString()}] ${h.type}: ${h.text}`).join('\n\n'));
+            }
+        }
+
+        async function resolveAppeal(userId, isUnban) {
+            const u = cachedUsers.find(x => x.id === userId);
+            if (isUnban) {
+                u.banned = false;
+                u.history.push({ type: 'Апелляция одобрена', text: 'Разбанен.', date: new Date().toISOString() });
+            } else {
+                u.history.push({ type: 'Апелляция отклонена', text: 'Бан оставлен в силе.', date: new Date().toISOString() });
+            }
+            u.ban.appealSubmitted = false;
+            await saveAdminAction();
+            loadAdminTab('appeals');
+        }
+
+        async function saveAdminAction() {
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Сохранено');
+        }
+
+        // === СТАРТ ===
+        window.onload = () => navigate('home');
+    </script>
+</body>
+</html>
