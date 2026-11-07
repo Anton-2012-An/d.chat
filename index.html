@@ -246,7 +246,6 @@
         function renderProfile(user) {
             const app = document.getElementById('app');
             
-            // Блок статуса (Бан)
             let statusHtml = '';
             if (user.banned) {
                 const banTime = new Date(user.ban.issuedAt).getTime();
@@ -272,7 +271,6 @@
                 statusHtml = `<p style="margin-bottom:16px;">Статус аккаунта: <span class="badge badge-active">Активен</span></p>`;
             }
 
-            // История
             const historyHtml = user.history && user.history.length > 0 
                 ? user.history.sort((a,b) => new Date(b.date) - new Date(a.date)).map(h => `
                     <div class="history-item">
@@ -282,7 +280,6 @@
                     </div>`).join('')
                 : '<p style="color:var(--text-muted)">Действий пока не было.</p>';
 
-            // Форма вопроса
             const askQuestionHtml = `
                 <div class="card">
                     <h3>Задать вопрос поддержке</h3>
@@ -344,7 +341,7 @@
             navigate('profile');
         }
 
-        // === АДМИН ПАНЕЛЬ (ГЛАВНЫЙ) ===
+        // === АДМИН ПАНЕЛЬ ===
         let cachedUsers = null;
         async function renderAdminPanel(adminUser) {
             const app = document.getElementById('app');
@@ -457,8 +454,10 @@
                 let questions = [];
                 users.forEach(u => {
                     if(u.history) {
-                        u.history.forEach(h => {
-                            if (h.type.includes('Вопрос')) questions.push({ ...h, userName: u.name, userId: u.id });
+                        u.history.forEach((h, index) => {
+                            if (h.type === 'Вопрос') {
+                                questions.push({ ...h, userName: u.name, userId: u.id, uniqueId: `${u.id}-${index}` });
+                            }
                         });
                     }
                 });
@@ -470,8 +469,8 @@
                         <div class="card">
                             <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName} (${q.userId})</p>
                             <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
-                            <textarea id="ans-${q.userId}-${new Date(q.date).getTime()}" placeholder="Ваш ответ..."></textarea>
-                            <button class="btn btn-sm" onclick="adminAnswer('${q.userId}', 'ans-${q.userId}-${new Date(q.date).getTime()}')">Ответить</button>
+                            <textarea id="ans-${q.uniqueId}" placeholder="Ваш ответ..."></textarea>
+                            <button class="btn btn-sm" onclick="adminAnswer('${q.userId}', 'ans-${q.uniqueId}')">Ответить</button>
                         </div>
                     `).join('')}
                 `;
@@ -574,7 +573,6 @@
                 </div>
             `;
             
-            // Загружаем первую доступную вкладку
             if (user.roles.appealReviewer) loadHelperTab('appeals');
             else if (user.roles.punisher) loadHelperTab('users');
             else if (user.roles.questionResponder) loadHelperTab('questions');
@@ -622,8 +620,10 @@
                 let questions = [];
                 users.forEach(u => {
                     if(u.history) {
-                        u.history.forEach(h => {
-                            if (h.type.includes('Вопрос')) questions.push({ ...h, userName: u.name, userId: u.id });
+                        u.history.forEach((h, index) => {
+                            if (h.type === 'Вопрос') {
+                                questions.push({ ...h, userName: u.name, userId: u.id, uniqueId: `h-${u.id}-${index}` });
+                            }
                         });
                     }
                 });
@@ -635,8 +635,8 @@
                         <div class="card">
                             <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName} (${q.userId})</p>
                             <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
-                            <textarea id="ans-h-${q.userId}-${new Date(q.date).getTime()}" placeholder="Ваш ответ..."></textarea>
-                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-h-${q.userId}-${new Date(q.date).getTime()}')">Ответить</button>
+                            <textarea id="ans-${q.uniqueId}" placeholder="Ваш ответ..."></textarea>
+                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-${q.uniqueId}')">Ответить</button>
                         </div>
                     `).join('')}
                 `;
