@@ -30,6 +30,7 @@
         .btn-outline:hover { background: var(--surface-hover); }
         .btn-danger { background: var(--danger); }
         .btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
         input, select, textarea { width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-main); font-family: var(--font); margin-bottom: 16px; }
@@ -50,7 +51,7 @@
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
         .badge-banned { background: rgba(255, 71, 87, 0.1); color: var(--danger); border: 1px solid var(--danger); }
         .badge-active { background: rgba(46, 213, 115, 0.1); color: var(--success); border: 1px solid var(--success); }
-        .badge-role { background: rgba(108, 92, 231, 0.1); color: var(--accent); border: 1px solid var(--accent); margin-right: 4px; }
+        .badge-role { background: rgba(108, 92, 231, 0.1); color: var(--accent); border: 1px solid var(--accent); margin-right: 4px; display:inline-block; margin-bottom:4px; }
         
         .admin-layout { display: flex; gap: 24px; }
         .sidebar { width: 250px; flex-shrink: 0; }
@@ -64,6 +65,8 @@
         
         .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; }
         .modal-content { background: var(--surface); padding: 24px; border-radius: var(--radius); width: 100%; max-width: 600px; border: 1px solid var(--border); max-height: 90vh; overflow-y: auto; }
+
+        .ban-screen { background: var(--surface); border: 2px solid var(--danger); border-radius: var(--radius); padding: 40px; text-align: center; max-width: 600px; margin: 40px auto; }
     </style>
 </head>
 <body>
@@ -83,6 +86,7 @@
         const BIN_USERS = '6aef1ed1ac6210605a7531df';
         const ACCESS_KEY = '$2a$10$m6buwMc4zT9yYS4PFllPleBYLMtcfupWSsXMe4/521Wo3fVKR4FdS';
         const API_URL = 'https://api.jsonbin.io/v3/b/';
+        let currentIP = null;
 
         // === API ===
         async function fetchBin(binId) {
@@ -97,6 +101,18 @@
                 body: JSON.stringify(record)
             });
         }
+        async function getIP() {
+            if (currentIP) return currentIP;
+            try {
+                const res = await fetch('https://api.ipify.org?format=json');
+                const data = await res.json();
+                currentIP = data.ip;
+                return currentIP;
+            } catch (e) {
+                console.error("Не удалось получить IP");
+                return "unknown";
+            }
+        }
 
         // === АВТОРИЗАЦИЯ ===
         function getSession() { return JSON.parse(localStorage.getItem('dchat_session')); }
@@ -105,9 +121,17 @@
 
         async function getCurrentUser() {
             const session = getSession();
-            if (!session) return null;
+            const ip = await getIP();
             const usersData = await fetchBin(BIN_USERS);
             if (!usersData || !usersData.users) return null;
+
+            // 1. Проверка бан-листа IP (фейковый юзер с id 'IP_BAN_LIST')
+            const ipBanRecord = usersData.users.find(u => u.id === 'IP_BAN_LIST');
+            if (ipBanRecord && ipBanRecord.bannedIPs && ipBanRecord.bannedIPs.includes(ip)) {
+                return { bannedByIP: true, ip: ip };
+            }
+
+            if (!session) return null;
             return usersData.users.find(u => u.id === session.userId);
         }
 
@@ -117,12 +141,24 @@
             const nav = document.getElementById('nav-links');
             const user = await getCurrentUser();
 
+            // Если IP забанен
+            if (user && user.bannedByIP) {
+                document.getElementById('app').innerHTML = `
+                    <div class="ban-screen">
+                        <h2 style="color:var(--danger); margin-bottom:20px;">Доступ заблокирован</h2>
+                        <p>Ваш IP-адрес (${user.ip}) был заблокирован администрацией.</p>
+                        <p style="color:var(--text-muted); margin-top:10px;">Пожалуйста, обратитесь в поддержку.</p>
+                    </div>
+                `;
+                return;
+            }
+
             // Навигация
             if (user) {
                 let links = `<a onclick="navigate('faq')">FAQ</a>`;
                 if (user.isAdmin) {
                     links += `<a onclick="navigate('admin')">Админ-панель</a>`;
-                } else if (user.roles.punisher || user.roles.appealReviewer || user.roles.questionResponder) {
+                } else if (user.roles && (user.roles.punisher || user.roles.appealReviewer || user.roles.questionResponder)) {
                     links += `<a onclick="navigate('helper')">Панель помощника</a>`;
                 }
                 links += `<a onclick="navigate('profile')">Личный кабинет</a>`;
@@ -217,7 +253,7 @@
             while (usersData.users.some(u => u.id === newId));
 
             const newUser = {
-                id: newId, name, email, telegram: tg, passwordHash: await hashPassword(pass),
+                id: newId, name, email, telegram: tg, passwordHash: await hashPassword(pass), ip: await getIP(),
                 isAdmin: false, roles: { punisher: false, appealReviewer: false, questionResponder: false },
                 banned: false, ban: null,
                 history: [{ type: 'Система', text: 'Аккаунт успешно создан', date: new Date().toISOString() }]
@@ -252,19 +288,27 @@
                 const daysPassed = (Date.now() - banTime) / (1000 * 3600 * 24);
                 let appealHtml = '';
                 
-                if (daysPassed > 3) appealHtml = '<p style="color:var(--text-muted); margin-top:10px;">Срок подачи апелляции истек (более 3 дней).</p>';
-                else if (user.ban.appealSubmitted) appealHtml = '<p style="color:var(--accent); margin-top:10px;">Ваша апелляция находится на рассмотрении.</p>';
-                else appealHtml = `
-                    <div style="margin-top: 16px;">
-                        <textarea id="appeal-text" placeholder="Объясните, почему вас стоит разбанить..."></textarea>
-                        <button class="btn" onclick="submitAppeal('${user.id}')">Отправить апелляцию</button>
-                    </div>`;
+                if (user.ban.appealDenied) {
+                    appealHtml = '<p style="color:var(--danger); margin-top:10px;">В удовлетворении апелляции отказано. Вы больше не можете подавать апелляции.</p>';
+                } else if (user.ban.appealSubmitted) {
+                    appealHtml = '<p style="color:var(--accent); margin-top:10px;">Ваша апелляция находится на рассмотрении.</p>';
+                } else if (daysPassed > 3) {
+                    appealHtml = '<p style="color:var(--text-muted); margin-top:10px;">Срок подачи апелляции истек (более 3 дней).</p>';
+                } else {
+                    appealHtml = `
+                        <div style="margin-top: 16px;">
+                            <textarea id="appeal-text" placeholder="Объясните, почему вас стоит разбанить..."></textarea>
+                            <button class="btn" onclick="submitAppeal('${user.id}')">Отправить апелляцию</button>
+                        </div>`;
+                }
 
                 statusHtml = `
                     <div class="card" style="border-color: var(--danger)">
                         <h3 style="color: var(--danger)">Вы забанены</h3>
                         <p><strong>Причина:</strong> ${user.ban.reason}</p>
-                        <p><strong>До:</strong> ${new Date(user.ban.until).toLocaleString()}</p>
+                        <p><strong>Дата выдачи:</strong> ${new Date(user.ban.issuedAt).toLocaleString()}</p>
+                        <p><strong>Дата конца:</strong> ${new Date(user.ban.until).toLocaleString()}</p>
+                        <p><strong>Кто забанил:</strong> ${user.ban.bannedBy}</p>
                         ${appealHtml}
                     </div>`;
             } else {
@@ -280,10 +324,10 @@
                     </div>`).join('')
                 : '<p style="color:var(--text-muted)">Действий пока не было.</p>';
 
-            const askQuestionHtml = `
+            // Если бан, запрещаем задавать вопросы
+            const askQuestionHtml = user.banned ? '' : `
                 <div class="card">
                     <h3>Задать вопрос поддержке</h3>
-                    <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Ваш вопрос увидят Ответчики и Администрация.</p>
                     <textarea id="question-text" placeholder="Напишите ваш вопрос..."></textarea>
                     <button class="btn btn-sm" onclick="askQuestion('${user.id}')">Отправить</button>
                 </div>
@@ -299,6 +343,7 @@
                                 ${user.roles.punisher ? '<span class="badge badge-role">Наказатель</span>' : ''}
                                 ${user.roles.appealReviewer ? '<span class="badge badge-role">Обжалователь</span>' : ''}
                                 ${user.roles.questionResponder ? '<span class="badge badge-role">Ответчик</span>' : ''}
+                                ${user.roles.customRoles ? user.roles.customRoles.map(r => `<span class="badge badge-role">${r}</span>`).join('') : ''}
                             </div>
                             ${statusHtml}
                         </div>
@@ -352,8 +397,8 @@
                 <div class="admin-layout">
                     <div class="sidebar">
                         <div class="sidebar-item active" onclick="loadAdminTab('users', this)">Пользователи</div>
-                        <div class="sidebar-item" onclick="loadAdminTab('banned', this)">Список наказанных</div>
-                        <div class="sidebar-item" onclick="loadAdminTab('roles', this)">Все работники</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('banned', this)">Апелляции</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('ipban', this)">Бан по IP</div>
                         <div class="sidebar-item" onclick="loadAdminTab('logs', this)">Действия помощников</div>
                         <div class="sidebar-item" onclick="loadAdminTab('questions', this)">Вопросы</div>
                     </div>
@@ -369,18 +414,17 @@
                 el.classList.add('active');
             }
             const content = document.getElementById('admin-content');
-            const users = cachedUsers.filter(u => !u.isAdmin);
+            const users = cachedUsers.filter(u => !u.isAdmin && u.id !== 'IP_BAN_LIST');
 
             if (tab === 'users') {
                 content.innerHTML = `
                     <h2>Список всех пользователей</h2>
                     <table>
-                        <tr><th>ID</th><th>Имя</th><th>Telegram</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
+                        <tr><th>ID</th><th>Имя</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
                         ${users.map(u => `
                             <tr>
                                 <td>${u.id}</td>
                                 <td>${u.name}</td>
-                                <td>${u.telegram || '-'}</td>
                                 <td>${getRoles(u.roles)}</td>
                                 <td>${u.banned ? '<span class="badge badge-banned">Забанен</span>' : '<span class="badge badge-active">Активен</span>'}</td>
                                 <td><button class="btn btn-sm btn-outline" onclick="openAdminModal('${u.id}')">Управление</button></td>
@@ -392,49 +436,58 @@
             else if (tab === 'banned') {
                 const banned = users.filter(u => u.banned);
                 content.innerHTML = `
-                    <h2>Список наказанных и апелляции</h2>
-                    ${banned.length === 0 ? '<p>Забаненных нет.</p>' : `
-                    <div style="display:flex; flex-direction:column; gap:16px;">
-                        ${banned.map(u => `
-                            <div class="card">
-                                <p><strong>${u.name}</strong> (ID: ${u.id})</p>
-                                <p>Причина бана: ${u.ban.reason} | До: ${new Date(u.ban.until).toLocaleString()}</p>
-                                ${u.ban.appealSubmitted ? `
-                                    <div style="margin-top:16px; padding:16px; background:var(--bg); border-radius:var(--radius); border-left: 4px solid var(--warning);">
-                                        <p style="color:var(--warning); font-weight:600;">Апелляция пользователя:</p>
-                                        <p style="margin-bottom:12px;">"${u.ban.appealText}"</p>
-                                        <textarea id="admin-reply-${u.id}" placeholder="Напишите ответ (почему разбанили или отклонили)..."></textarea>
-                                        <div style="display:flex; gap:10px;">
-                                            <button class="btn btn-sm btn-outline" onclick="adminResolveAppeal('${u.id}', true)">Разбанить с ответом</button>
-                                            <button class="btn btn-sm btn-danger" onclick="adminResolveAppeal('${u.id}', false)">Отклонить с ответом</button>
-                                        </div>
+                    <h2>Апелляции и наказанные</h2>
+                    ${banned.length === 0 ? '<p>Забаненных нет.</p>' : banned.map(u => `
+                        <div class="card">
+                            <p><strong>${u.name}</strong> (ID: ${u.id})</p>
+                            <p>Причина: ${u.ban.reason} | До: ${new Date(u.ban.until).toLocaleString()}</p>
+                            ${u.ban.appealSubmitted ? `
+                                <div style="margin-top:16px; padding:16px; background:var(--bg); border-left: 4px solid var(--warning);">
+                                    <p style="color:var(--warning); font-weight:600;">Апелляция: "${u.ban.appealText}"</p>
+                                    <div style="margin-top:12px;">
+                                        <label>1. Решение:</label>
+                                        <select id="admin-decision-${u.id}">
+                                            <option value="unban">Разбанить</option>
+                                            <option value="reject">Оставить без удовлетворения (отклонить)</option>
+                                        </select>
+                                        <label>2. Текст ответа:</label>
+                                        <textarea id="admin-reply-${u.id}" placeholder="Комментарий к решению..."></textarea>
                                     </div>
-                                ` : `
-                                    <div style="margin-top:16px;">
-                                        <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить досрочно (без апелляции)</button>
-                                    </div>
-                                `}
-                            </div>
-                        `).join('')}
-                    </div>`}
+                                    <button class="btn btn-sm" onclick="adminResolveAppeal('${u.id}')">3. Выполнить решение</button>
+                                </div>
+                            ` : `
+                                <button class="btn btn-sm btn-outline" style="margin-top:10px;" onclick="adminUnban('${u.id}')">Разбанить досрочно</button>
+                            `}
+                        </div>
+                    `).join('')}
                 `;
             }
-            else if (tab === 'roles') {
-                const workers = users.filter(u => u.roles.punisher || u.roles.appealReviewer || u.roles.questionResponder);
+            else if (tab === 'ipban') {
+                const ipBanRecord = cachedUsers.find(u => u.id === 'IP_BAN_LIST');
+                const bannedIPs = ipBanRecord && ipBanRecord.bannedIPs ? ipBanRecord.bannedIPs : [];
+                const pendingRequests = cachedUsers.filter(u => u.ipBanRequest && u.ipBanRequest.status === 'pending');
+
                 content.innerHTML = `
-                    <h2>Все работники</h2>
-                    ${workers.length === 0 ? '<p>Работников пока нет.</p>' : `
-                    <table>
-                        <tr><th>ID</th><th>Имя</th><th>Должности</th><th>Действия</th></tr>
-                        ${workers.map(u => `
-                            <tr>
-                                <td>${u.id}</td>
-                                <td>${u.name}</td>
-                                <td>${getRoles(u.roles)}</td>
-                                <td><button class="btn btn-sm btn-outline" onclick="openAdminModal('${u.id}')">Изменить права</button></td>
-                            </tr>
-                        `).join('')}
-                    </table>`}
+                    <h2>Бан по IP-адресу</h2>
+                    <div class="card">
+                        <h3>Забанить новый IP</h3>
+                        <input type="text" id="new-ip-ban" placeholder="Введите IP (например, 192.168.1.1)">
+                        <button class="btn btn-danger" onclick="adminAddIPBan()">Забанить IP</button>
+                    </div>
+                    <h3>Забаненные IP:</h3>
+                    <ul>
+                        ${bannedIPs.length === 0 ? '<p>Нет забаненных IP.</p>' : bannedIPs.map(ip => `<li>${ip} <button class="btn btn-sm btn-outline" onclick="adminRemoveIPBan('${ip}')">Разбанить</button></li>`).join('')}
+                    </ul>
+                    <h3 style="margin-top:30px;">Запросы от помощников на бан по IP:</h3>
+                    ${pendingRequests.length === 0 ? '<p>Запросов нет.</p>' : pendingRequests.map(u => `
+                        <div class="card">
+                            <p><strong>Пользователь:</strong> ${u.name} (IP: ${u.ip})</p>
+                            <p><strong>Запрос от:</strong> ${u.ipBanRequest.requesterName}</p>
+                            <textarea id="ip-req-reply-${u.id}" placeholder="Комментарий (при отказе обязателен)"></textarea>
+                            <button class="btn btn-sm btn-danger" onclick="adminResolveIPReq('${u.id}', true)">Одобрить бан IP</button>
+                            <button class="btn btn-sm btn-outline" onclick="adminResolveIPReq('${u.id}', false)">Отказать</button>
+                        </div>
+                    `).join('')}
                 `;
             }
             else if (tab === 'logs') {
@@ -450,10 +503,10 @@
                 });
                 allActions.sort((a,b) => new Date(b.date) - new Date(a.date));
                 content.innerHTML = `
-                    <h2>Действия помощников</h2>
+                    <h2>Действия в системе</h2>
                     ${allActions.length === 0 ? '<p>Действий пока нет.</p>' : allActions.map(a => `
                         <div class="history-item">
-                            <div class="history-date">${new Date(a.date).toLocaleString()} | Пользователь: ${a.userName} (${a.userId})</div>
+                            <div class="history-date">${new Date(a.date).toLocaleString()} | Пользователь: ${a.userName}</div>
                             <strong>${a.type}</strong>
                             <p>${a.text}</p>
                         </div>
@@ -474,52 +527,105 @@
                 questions.sort((a,b) => new Date(b.date) - new Date(a.date));
 
                 content.innerHTML = `
-                    <h2>Все вопросы от пользователей</h2>
+                    <h2>Все вопросы</h2>
                     ${questions.length === 0 ? '<p>Вопросов нет.</p>' : questions.map(q => `
                         <div class="card">
-                            <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName} (${q.userId})</p>
+                            <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName}</p>
                             <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
                             <textarea id="ans-${q.uniqueId}" placeholder="Ваш ответ..."></textarea>
-                            <button class="btn btn-sm" onclick="adminAnswer('${q.userId}', 'ans-${q.uniqueId}')">Ответить</button>
+                            <button class="btn btn-sm" onclick="adminAnswer('${q.userId}', 'ans-${q.uniqueId}', ${q.uniqueId.split('-')[1]})">Ответить</button>
                         </div>
                     `).join('')}
                 `;
             }
         }
 
-        // === НОВАЯ ФУНКЦИЯ: РЕШЕНИЕ АПЕЛЛЯЦИИ АДМИНОМ ===
-        async function adminResolveAppeal(userId, isUnban) {
+        // === ЛОГИКА АПЕЛЛЯЦИЙ ===
+        async function adminResolveAppeal(userId) {
+            const decision = document.getElementById(`admin-decision-${userId}`).value;
             const replyText = document.getElementById(`admin-reply-${userId}`).value;
             const u = cachedUsers.find(x => x.id === userId);
             
-            if (isUnban) {
+            if (decision === 'unban') {
                 u.banned = false;
+                if(u.ban) u.ban.appealSubmitted = false;
                 u.history.push({ 
                     type: 'Апелляция (Админ)', 
-                    text: `Решение: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, 
+                    text: `РЕШЕНИЕ: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, 
                     date: new Date().toISOString() 
                 });
             } else {
+                u.ban.appealSubmitted = false;
+                u.ban.appealDenied = true; // Блокируем повторную подачу
                 u.history.push({ 
                     type: 'Апелляция (Админ)', 
-                    text: `Решение: ОТКЛОНЕНО. Ответ: ${replyText || 'Без комментария'}`, 
+                    text: `РЕШЕНИЕ: ОТКАЗАНО. Ответ: ${replyText || 'Без комментария'}`, 
                     date: new Date().toISOString() 
                 });
             }
-            if(u.ban) u.ban.appealSubmitted = false;
             
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Решение по апелляции принято и записано в историю!');
+            alert('Решение выполнено!');
             navigate('admin');
         }
 
-        async function adminAnswer(userId, inputId) {
+        // === БАН ПО IP (ГЛАВНЫЙ АДМИН) ===
+        async function adminAddIPBan() {
+            const ip = document.getElementById('new-ip-ban').value;
+            if (!ip) return;
+            let ipRecord = cachedUsers.find(u => u.id === 'IP_BAN_LIST');
+            if (!ipRecord) {
+                ipRecord = { id: 'IP_BAN_LIST', bannedIPs: [] };
+                cachedUsers.push(ipRecord);
+            }
+            if (!ipRecord.bannedIPs) ipRecord.bannedIPs = [];
+            if (!ipRecord.bannedIPs.includes(ip)) ipRecord.bannedIPs.push(ip);
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('IP забанен');
+            loadAdminTab('ipban');
+        }
+
+        async function adminRemoveIPBan(ip) {
+            const ipRecord = cachedUsers.find(u => u.id === 'IP_BAN_LIST');
+            if (ipRecord && ipRecord.bannedIPs) {
+                ipRecord.bannedIPs = ipRecord.bannedIPs.filter(i => i !== ip);
+                await updateBin(BIN_USERS, { users: cachedUsers });
+                loadAdminTab('ipban');
+            }
+        }
+
+        async function adminResolveIPReq(userId, approve) {
+            const reply = document.getElementById(`ip-req-reply-${userId}`).value;
+            const u = cachedUsers.find(x => x.id === userId);
+            
+            if (approve) {
+                let ipRecord = cachedUsers.find(x => x.id === 'IP_BAN_LIST');
+                if (!ipRecord) { ipRecord = { id: 'IP_BAN_LIST', bannedIPs: [] }; cachedUsers.push(ipRecord); }
+                if (!ipRecord.bannedIPs) ipRecord.bannedIPs = [];
+                if (!ipRecord.bannedIPs.includes(u.ip)) ipRecord.bannedIPs.push(u.ip);
+                
+                u.history.push({ type: 'IP Бан (Админ)', text: `IP ${u.ip} забанен. Комментарий: ${reply}`, date: new Date().toISOString() });
+            } else {
+                u.history.push({ type: 'IP Бан (Отказ)', text: `Запрос на бан IP отклонен. Комментарий: ${reply}`, date: new Date().toISOString() });
+            }
+            u.ipBanRequest = null;
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Запрос обработан');
+            loadAdminTab('ipban');
+        }
+
+        async function adminAnswer(userId, inputId, historyIndex) {
             const answer = document.getElementById(inputId).value;
             if (!answer) return;
             const u = cachedUsers.find(x => x.id === userId);
+            
+            // Удаляем оригинальный вопрос из истории
+            u.history.splice(historyIndex, 1);
+            // Записываем ответ
             u.history.push({ type: 'Ответ поддержки', text: answer, date: new Date().toISOString() });
+            
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Ответ отправлен!');
+            alert('Ответ отправлен! Вопрос закрыт.');
             loadAdminTab('questions');
         }
 
@@ -530,25 +636,29 @@
                 <div class="modal" onclick="if(event.target===this) closeModal()">
                     <div class="modal-content">
                         <h2>${u.name} (${u.id})</h2>
-                        <p style="margin-bottom:16px;">Статус: ${u.banned ? '<span style="color:var(--danger)">Забанен</span>' : '<span style="color:var(--success)">Активен</span>'}</p>
                         
-                        <h4>Выдать/снять должности:</h4>
+                        <h4>Стандартные роли:</h4>
                         <div style="margin-bottom:16px;">
                             <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-punisher" ${u.roles.punisher ? 'checked' : ''}> Наказатель</label>
                             <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-reviewer" ${u.roles.appealReviewer ? 'checked' : ''}> Обжалователь</label>
                             <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-responder" ${u.roles.questionResponder ? 'checked' : ''}> Ответчик</label>
                         </div>
 
-                        <h4>Наказания:</h4>
-                        ${u.banned ? `
-                            <p>Причина: ${u.ban.reason}</p>
-                            <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить досрочно</button>
-                        ` : `
-                            <button class="btn btn-sm btn-danger" onclick="adminBan('${u.id}')">Забанить</button>
-                        `}
+                        <h4>Кастомная роль (текстом):</h4>
+                        <input type="text" id="custom-role-input" placeholder="Например: Модератор чата" value="${u.roles.customRoles ? u.roles.customRoles.join(', ') : ''}">
+
+                        <h4>Действия:</h4>
+                        <div style="display:flex; flex-direction:column; gap:10px;">
+                            ${u.banned ? `
+                                <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить досрочно</button>
+                            ` : `
+                                <button class="btn btn-sm btn-danger" onclick="adminBan('${u.id}')">Забанить (обычный бан)</button>
+                            `}
+                            <button class="btn btn-sm btn-danger" onclick="requestIPBan('${u.id}')">Забанить по IP (запрос)</button>
+                        </div>
 
                         <div style="margin-top:24px; display:flex; gap:10px;">
-                            <button class="btn" onclick="saveRoles('${u.id}')">Сохранить роли</button>
+                            <button class="btn" onclick="saveRoles('${u.id}')">Сохранить</button>
                             <button class="btn btn-outline" onclick="closeModal()">Закрыть</button>
                         </div>
                     </div>
@@ -561,7 +671,14 @@
             const p = document.getElementById('role-punisher').checked;
             const r = document.getElementById('role-reviewer').checked;
             const res = document.getElementById('role-responder').checked;
-            u.roles = { punisher: p, appealReviewer: r, questionResponder: res };
+            const custom = document.getElementById('custom-role-input').value;
+            
+            u.roles = { 
+                punisher: p, 
+                appealReviewer: r, 
+                questionResponder: res,
+                customRoles: custom ? custom.split(',').map(s => s.trim()).filter(Boolean) : []
+            };
             u.history.push({ type: 'Система', text: 'Изменены должности пользователя.', date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
             closeModal(); navigate('admin');
@@ -576,7 +693,14 @@
             const u = cachedUsers.find(x => x.id === userId);
             const until = new Date(); until.setDate(until.getDate() + parseInt(days));
             u.banned = true;
-            u.ban = { reason, issuedAt: new Date().toISOString(), until: until.toISOString(), appealSubmitted: false };
+            u.ban = { 
+                reason, 
+                issuedAt: new Date().toISOString(), 
+                until: until.toISOString(), 
+                appealSubmitted: false, 
+                appealDenied: false,
+                bannedBy: "Главный Админ" 
+            };
             u.history.push({ type: 'Бан', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
             closeModal(); navigate('admin');
@@ -585,9 +709,22 @@
         async function adminUnban(userId) {
             const u = cachedUsers.find(x => x.id === userId);
             u.banned = false;
-            if(u.ban) u.ban.appealSubmitted = false;
-            u.history.push({ type: 'Разбан', text: 'Снят администратором досрочно (без апелляции).', date: new Date().toISOString() });
+            if(u.ban) { u.ban.appealSubmitted = false; u.ban.appealDenied = false; }
+            u.history.push({ type: 'Разбан', text: 'Снят администратором досрочно.', date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
+            closeModal(); navigate('admin');
+        }
+
+        async function requestIPBan(userId) {
+            const u = cachedUsers.find(x => x.id === userId);
+            const comment = prompt('Комментарий к запросу на бан IP:');
+            u.ipBanRequest = {
+                status: 'pending',
+                requesterName: 'Главный Админ',
+                comment: comment
+            };
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Запрос на IP-бан создан (одобрите его во вкладке "Бан по IP").');
             closeModal(); navigate('admin');
         }
 
@@ -620,20 +757,24 @@
                 el.classList.add('active');
             }
             const content = document.getElementById('helper-content');
-            const users = cachedUsers.filter(u => !u.isAdmin);
+            const users = cachedUsers.filter(u => !u.isAdmin && u.id !== 'IP_BAN_LIST');
 
             if (tab === 'appeals') {
                 const appeals = users.filter(u => u.banned && u.ban && u.ban.appealSubmitted);
                 content.innerHTML = `
-                    <h2>Обжалования наказаний</h2>
+                    <h2>Апелляции</h2>
                     ${appeals.length === 0 ? '<p>Нет активных апелляций.</p>' : appeals.map(u => `
                         <div class="card">
                             <p><strong>${u.name}</strong> (ID: ${u.id})</p>
-                            <p>Причина бана: ${u.ban.reason}</p>
-                            <p style="margin:10px 0; color:var(--warning)">Апелляция: "${u.ban.appealText}"</p>
-                            <textarea id="helper-reply-${u.id}" placeholder="Ответ пользователю..."></textarea>
-                            <button class="btn btn-sm btn-outline" onclick="helperResolveAppeal('${u.id}', true)">Разбанить (с ответом)</button>
-                            <button class="btn btn-sm btn-danger" onclick="helperResolveAppeal('${u.id}', false)">Отклонить (с ответом)</button>
+                            <p style="margin:10px 0; color:var(--warning)">"${u.ban.appealText}"</p>
+                            <label>1. Решение:</label>
+                            <select id="helper-decision-${u.id}">
+                                <option value="unban">Разбанить</option>
+                                <option value="reject">Оставить без удовлетворения</option>
+                            </select>
+                            <label>2. Ответ:</label>
+                            <textarea id="helper-reply-${u.id}" placeholder="Ответ..."></textarea>
+                            <button class="btn btn-sm" onclick="helperResolveAppeal('${u.id}')">3. Выполнить</button>
                         </div>
                     `).join('')}
                 `;
@@ -667,52 +808,46 @@
                 questions.sort((a,b) => new Date(b.date) - new Date(a.date));
 
                 content.innerHTML = `
-                    <h2>Вопросы от пользователей</h2>
+                    <h2>Вопросы</h2>
                     ${questions.length === 0 ? '<p>Вопросов нет.</p>' : questions.map(q => `
                         <div class="card">
-                            <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName} (${q.userId})</p>
+                            <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName}</p>
                             <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
                             <textarea id="ans-${q.uniqueId}" placeholder="Ваш ответ..."></textarea>
-                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-${q.uniqueId}')">Ответить</button>
+                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-${q.uniqueId}', ${q.uniqueId.split('-')[1]})">Ответить</button>
                         </div>
                     `).join('')}
                 `;
             }
         }
 
-        async function helperAnswer(userId, inputId) {
+        async function helperAnswer(userId, inputId, historyIndex) {
             const answer = document.getElementById(inputId).value;
             if (!answer) return;
             const u = cachedUsers.find(x => x.id === userId);
+            u.history.splice(historyIndex, 1);
             u.history.push({ type: 'Ответ поддержки', text: answer, date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Ответ отправлен!');
+            alert('Ответ отправлен, вопрос закрыт!');
             navigate('helper');
         }
 
-        // === НОВАЯ ФУНКЦИЯ: РЕШЕНИЕ АПЕЛЛЯЦИИ ПОМОЩНИКОМ ===
-        async function helperResolveAppeal(userId, isUnban) {
+        async function helperResolveAppeal(userId) {
+            const decision = document.getElementById(`helper-decision-${userId}`).value;
             const replyText = document.getElementById(`helper-reply-${userId}`).value;
             const u = cachedUsers.find(x => x.id === userId);
             
-            if (isUnban) {
+            if (decision === 'unban') {
                 u.banned = false;
-                u.history.push({ 
-                    type: 'Апелляция (Помощник)', 
-                    text: `Решение: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, 
-                    date: new Date().toISOString() 
-                });
+                u.history.push({ type: 'Апелляция (Помощник)', text: `РАЗБАНЕН. Ответ: ${replyText}`, date: new Date().toISOString() });
             } else {
-                u.history.push({ 
-                    type: 'Апелляция (Помощник)', 
-                    text: `Решение: ОТКЛОНЕНО. Ответ: ${replyText || 'Без комментария'}`, 
-                    date: new Date().toISOString() 
-                });
+                u.ban.appealDenied = true; // Блокируем навсегда
+                u.history.push({ type: 'Апелляция (Помощник)', text: `ОТКАЗАНО. Ответ: ${replyText}`, date: new Date().toISOString() });
             }
             if(u.ban) u.ban.appealSubmitted = false;
             
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Решение принято!');
+            alert('Решение выполнено!');
             navigate('helper');
         }
 
@@ -720,13 +855,39 @@
             const reason = prompt('Причина бана:');
             const days = prompt('Срок (дней):', '7');
             if (!reason || !days) return;
+            const user = await getCurrentUser();
             const u = cachedUsers.find(x => x.id === userId);
             const until = new Date(); until.setDate(until.getDate() + parseInt(days));
+            
             u.banned = true;
-            u.ban = { reason, issuedAt: new Date().toISOString(), until: until.toISOString(), appealSubmitted: false };
+            u.ban = { 
+                reason, 
+                issuedAt: new Date().toISOString(), 
+                until: until.toISOString(), 
+                appealSubmitted: false, 
+                appealDenied: false,
+                bannedBy: `Главный Админ | by ${user.name}` // Формат из ТЗ
+            };
             u.history.push({ type: 'Бан (Помощник)', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
             alert('Пользователь забанен');
+            navigate('helper');
+        }
+
+        async function requestHelperIPBan(userId) {
+            const user = await getCurrentUser();
+            const comment = prompt('Причина для запроса IP-бана:');
+            if (!comment) return;
+            
+            const u = cachedUsers.find(x => x.id === userId);
+            u.ipBanRequest = {
+                status: 'pending',
+                requesterName: user.name,
+                comment: comment
+            };
+            u.history.push({ type: 'Запрос IP-бана', text: `Запрос отправлен Главному Админу. Причина: ${comment}`, date: new Date().toISOString() });
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Запрос на IP-бан отправлен Главному Админу!');
             navigate('helper');
         }
 
@@ -735,7 +896,8 @@
             if (roles.punisher) r.push('Наказатель');
             if (roles.appealReviewer) r.push('Обжалователь');
             if (roles.questionResponder) r.push('Ответчик');
-            return r.length ? r.join(', ') : 'Пользователь';
+            if (roles.customRoles) r.push(...roles.customRoles);
+            return r.length ? r.map(role => `<span class="badge badge-role">${role}</span>`).join(' ') : 'Пользователь';
         }
 
         window.onload = () => navigate('home');
