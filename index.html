@@ -66,7 +66,7 @@
         .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 1000; }
         .modal-content { background: var(--surface); padding: 24px; border-radius: var(--radius); width: 100%; max-width: 600px; border: 1px solid var(--border); max-height: 90vh; overflow-y: auto; }
 
-        .ban-screen { background: var(--surface); border: 2px solid var(--danger); border-radius: var(--radius); padding: 40px; text-align: center; max-width: 600px; margin: 40px auto; }
+        .ban-screen { background: var(--surface); border: 2px solid var(--danger); border-radius: var(--radius); padding: 40px; text-align: center; max-width: 600px; margin: 40px auto; box-shadow: 0 10px 30px rgba(255, 71, 87, 0.1); }
     </style>
 </head>
 <body>
@@ -114,23 +114,25 @@
             }
         }
 
-        // === АВТОРИЗАЦИЯ ===
+        // === АВТОРИЗАЦИЯ И ПРОВЕРКА IP ===
         function getSession() { return JSON.parse(localStorage.getItem('dchat_session')); }
         function setSession(userId) { localStorage.setItem('dchat_session', JSON.stringify({ userId })); }
         function logout() { localStorage.removeItem('dchat_session'); navigate('home'); }
 
         async function getCurrentUser() {
-            const session = getSession();
             const ip = await getIP();
             const usersData = await fetchBin(BIN_USERS);
             if (!usersData || !usersData.users) return null;
 
-            // 1. Проверка бан-листа IP (фейковый юзер с id 'IP_BAN_LIST')
+            // 1. Проверка бан-листа IP (скрытый юзер с id 'IP_BAN_LIST')
             const ipBanRecord = usersData.users.find(u => u.id === 'IP_BAN_LIST');
-            if (ipBanRecord && ipBanRecord.bannedIPs && ipBanRecord.bannedIPs.includes(ip)) {
-                return { bannedByIP: true, ip: ip };
+            if (ipBanRecord && ipBanRecord.bannedIPs && ipBanRecord.bannedIPs[ip]) {
+                const banInfo = ipBanRecord.bannedIPs[ip];
+                return { bannedByIP: true, ip: ip, reason: banInfo.reason, date: banInfo.date, by: banInfo.by };
             }
 
+            // 2. Если IP не забанен, ищем сессию
+            const session = getSession();
             if (!session) return null;
             return usersData.users.find(u => u.id === session.userId);
         }
@@ -141,15 +143,18 @@
             const nav = document.getElementById('nav-links');
             const user = await getCurrentUser();
 
-            // Если IP забанен
+            // Если IP забанен - показываем блокировку
             if (user && user.bannedByIP) {
-                document.getElementById('app').innerHTML = `
+                app.innerHTML = `
                     <div class="ban-screen">
                         <h2 style="color:var(--danger); margin-bottom:20px;">Доступ заблокирован</h2>
-                        <p>Ваш IP-адрес (${user.ip}) был заблокирован администрацией.</p>
-                        <p style="color:var(--text-muted); margin-top:10px;">Пожалуйста, обратитесь в поддержку.</p>
+                        <p style="margin-bottom:10px;"><strong>Ваш IP-адрес (${user.ip}) забанен навсегда.</strong></p>
+                        <p><strong>Причина:</strong> ${user.reason}</p>
+                        <p><strong>Кто забанил:</strong> ${user.by}</p>
+                        <p style="color:var(--text-muted); font-size:0.9rem; margin-top:10px;">Дата: ${new Date(user.date).toLocaleString()}</p>
                     </div>
                 `;
+                nav.innerHTML = '';
                 return;
             }
 
@@ -324,7 +329,6 @@
                     </div>`).join('')
                 : '<p style="color:var(--text-muted)">Действий пока не было.</p>';
 
-            // Если бан, запрещаем задавать вопросы
             const askQuestionHtml = user.banned ? '' : `
                 <div class="card">
                     <h3>Задать вопрос поддержке</h3>
@@ -338,7 +342,7 @@
                     <div>
                         <div class="card">
                             <h2>${user.name}</h2>
-                            <p style="color:var(--text-muted); margin-bottom: 16px;">ID: ${user.id}</p>
+                            <p style="color:var(--text-muted); margin-bottom: 16px;">ID: ${user.id} | IP: ${user.ip}</p>
                             <div style="margin-bottom:16px;">
                                 ${user.roles.punisher ? '<span class="badge badge-role">Наказатель</span>' : ''}
                                 ${user.roles.appealReviewer ? '<span class="badge badge-role">Обжалователь</span>' : ''}
@@ -399,7 +403,7 @@
                         <div class="sidebar-item active" onclick="loadAdminTab('users', this)">Пользователи</div>
                         <div class="sidebar-item" onclick="loadAdminTab('banned', this)">Апелляции</div>
                         <div class="sidebar-item" onclick="loadAdminTab('ipban', this)">Бан по IP</div>
-                        <div class="sidebar-item" onclick="loadAdminTab('logs', this)">Действия помощников</div>
+                        <div class="sidebar-item" onclick="loadAdminTab('logs', this)">Действия</div>
                         <div class="sidebar-item" onclick="loadAdminTab('questions', this)">Вопросы</div>
                     </div>
                     <div class="admin-content" id="admin-content"></div>
@@ -420,11 +424,12 @@
                 content.innerHTML = `
                     <h2>Список всех пользователей</h2>
                     <table>
-                        <tr><th>ID</th><th>Имя</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
+                        <tr><th>ID</th><th>Имя</th><th>IP</th><th>Роли</th><th>Статус</th><th>Действия</th></tr>
                         ${users.map(u => `
                             <tr>
                                 <td>${u.id}</td>
                                 <td>${u.name}</td>
+                                <td>${u.ip || '-'}</td>
                                 <td>${getRoles(u.roles)}</td>
                                 <td>${u.banned ? '<span class="badge badge-banned">Забанен</span>' : '<span class="badge badge-active">Активен</span>'}</td>
                                 <td><button class="btn btn-sm btn-outline" onclick="openAdminModal('${u.id}')">Управление</button></td>
@@ -464,30 +469,29 @@
             }
             else if (tab === 'ipban') {
                 const ipBanRecord = cachedUsers.find(u => u.id === 'IP_BAN_LIST');
-                const bannedIPs = ipBanRecord && ipBanRecord.bannedIPs ? ipBanRecord.bannedIPs : [];
-                const pendingRequests = cachedUsers.filter(u => u.ipBanRequest && u.ipBanRequest.status === 'pending');
+                const bannedIPs = ipBanRecord && ipBanRecord.bannedIPs ? ipBanRecord.bannedIPs : {};
 
                 content.innerHTML = `
-                    <h2>Бан по IP-адресу</h2>
+                    <h2>Глобальный бан по IP (Навсегда)</h2>
                     <div class="card">
                         <h3>Забанить новый IP</h3>
                         <input type="text" id="new-ip-ban" placeholder="Введите IP (например, 192.168.1.1)">
+                        <input type="text" id="new-ip-reason" placeholder="Причина бана IP">
                         <button class="btn btn-danger" onclick="adminAddIPBan()">Забанить IP</button>
                     </div>
                     <h3>Забаненные IP:</h3>
-                    <ul>
-                        ${bannedIPs.length === 0 ? '<p>Нет забаненных IP.</p>' : bannedIPs.map(ip => `<li>${ip} <button class="btn btn-sm btn-outline" onclick="adminRemoveIPBan('${ip}')">Разбанить</button></li>`).join('')}
-                    </ul>
-                    <h3 style="margin-top:30px;">Запросы от помощников на бан по IP:</h3>
-                    ${pendingRequests.length === 0 ? '<p>Запросов нет.</p>' : pendingRequests.map(u => `
-                        <div class="card">
-                            <p><strong>Пользователь:</strong> ${u.name} (IP: ${u.ip})</p>
-                            <p><strong>Запрос от:</strong> ${u.ipBanRequest.requesterName}</p>
-                            <textarea id="ip-req-reply-${u.id}" placeholder="Комментарий (при отказе обязателен)"></textarea>
-                            <button class="btn btn-sm btn-danger" onclick="adminResolveIPReq('${u.id}', true)">Одобрить бан IP</button>
-                            <button class="btn btn-sm btn-outline" onclick="adminResolveIPReq('${u.id}', false)">Отказать</button>
-                        </div>
-                    `).join('')}
+                    <table>
+                        <tr><th>IP Адрес</th><th>Причина</th><th>Кто забанил</th><th>Дата</th><th>Действие</th></tr>
+                        ${Object.keys(bannedIPs).length === 0 ? '<tr><td colspan="5">Нет забаненных IP.</td></tr>' : Object.keys(bannedIPs).map(ip => `
+                            <tr>
+                                <td>${ip}</td>
+                                <td>${bannedIPs[ip].reason}</td>
+                                <td>${bannedIPs[ip].by}</td>
+                                <td>${new Date(bannedIPs[ip].date).toLocaleString()}</td>
+                                <td><button class="btn btn-sm btn-outline" onclick="adminRemoveIPBan('${ip}')">Разбанить</button></td>
+                            </tr>
+                        `).join('')}
+                    </table>
                 `;
             }
             else if (tab === 'logs') {
@@ -495,7 +499,7 @@
                 users.forEach(u => {
                     if(u.history) {
                         u.history.forEach(h => {
-                            if (h.type.includes('Бан') || h.type.includes('Апелляция') || h.type.includes('Роль') || h.type.includes('Ответ')) {
+                            if (h.type.includes('Бан') || h.type.includes('Апелляция') || h.type.includes('Роль') || h.type.includes('Ответ') || h.type.includes('IP')) {
                                 allActions.push({ ...h, userName: u.name, userId: u.id });
                             }
                         });
@@ -503,7 +507,7 @@
                 });
                 allActions.sort((a,b) => new Date(b.date) - new Date(a.date));
                 content.innerHTML = `
-                    <h2>Действия в системе</h2>
+                    <h2>Все действия в системе</h2>
                     ${allActions.length === 0 ? '<p>Действий пока нет.</p>' : allActions.map(a => `
                         <div class="history-item">
                             <div class="history-date">${new Date(a.date).toLocaleString()} | Пользователь: ${a.userName}</div>
@@ -549,19 +553,11 @@
             if (decision === 'unban') {
                 u.banned = false;
                 if(u.ban) u.ban.appealSubmitted = false;
-                u.history.push({ 
-                    type: 'Апелляция (Админ)', 
-                    text: `РЕШЕНИЕ: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, 
-                    date: new Date().toISOString() 
-                });
+                u.history.push({ type: 'Апелляция (Админ)', text: `РЕШЕНИЕ: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, date: new Date().toISOString() });
             } else {
                 u.ban.appealSubmitted = false;
                 u.ban.appealDenied = true; // Блокируем повторную подачу
-                u.history.push({ 
-                    type: 'Апелляция (Админ)', 
-                    text: `РЕШЕНИЕ: ОТКАЗАНО. Ответ: ${replyText || 'Без комментария'}`, 
-                    date: new Date().toISOString() 
-                });
+                u.history.push({ type: 'Апелляция (Админ)', text: `РЕШЕНИЕ: ОТКАЗАНО. Ответ: ${replyText || 'Без комментария'}`, date: new Date().toISOString() });
             }
             
             await updateBin(BIN_USERS, { users: cachedUsers });
@@ -569,49 +565,39 @@
             navigate('admin');
         }
 
-        // === БАН ПО IP (ГЛАВНЫЙ АДМИН) ===
+        // === ГЛОБАЛЬНЫЙ БАН ПО IP (ГЛАВНЫЙ АДМИН) ===
         async function adminAddIPBan() {
             const ip = document.getElementById('new-ip-ban').value;
-            if (!ip) return;
+            const reason = document.getElementById('new-ip-reason').value;
+            if (!ip || !reason) return alert('Заполните IP и причину');
+
+            const admin = await getCurrentUser();
             let ipRecord = cachedUsers.find(u => u.id === 'IP_BAN_LIST');
+            
             if (!ipRecord) {
-                ipRecord = { id: 'IP_BAN_LIST', bannedIPs: [] };
+                ipRecord = { id: 'IP_BAN_LIST', bannedIPs: {} };
                 cachedUsers.push(ipRecord);
             }
-            if (!ipRecord.bannedIPs) ipRecord.bannedIPs = [];
-            if (!ipRecord.bannedIPs.includes(ip)) ipRecord.bannedIPs.push(ip);
+            if (!ipRecord.bannedIPs) ipRecord.bannedIPs = {};
+            
+            ipRecord.bannedIPs[ip] = {
+                reason: reason,
+                by: admin.name,
+                date: new Date().toISOString()
+            };
+
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('IP забанен');
+            alert('IP забанен навсегда');
             loadAdminTab('ipban');
         }
 
         async function adminRemoveIPBan(ip) {
             const ipRecord = cachedUsers.find(u => u.id === 'IP_BAN_LIST');
             if (ipRecord && ipRecord.bannedIPs) {
-                ipRecord.bannedIPs = ipRecord.bannedIPs.filter(i => i !== ip);
+                delete ipRecord.bannedIPs[ip];
                 await updateBin(BIN_USERS, { users: cachedUsers });
                 loadAdminTab('ipban');
             }
-        }
-
-        async function adminResolveIPReq(userId, approve) {
-            const reply = document.getElementById(`ip-req-reply-${userId}`).value;
-            const u = cachedUsers.find(x => x.id === userId);
-            
-            if (approve) {
-                let ipRecord = cachedUsers.find(x => x.id === 'IP_BAN_LIST');
-                if (!ipRecord) { ipRecord = { id: 'IP_BAN_LIST', bannedIPs: [] }; cachedUsers.push(ipRecord); }
-                if (!ipRecord.bannedIPs) ipRecord.bannedIPs = [];
-                if (!ipRecord.bannedIPs.includes(u.ip)) ipRecord.bannedIPs.push(u.ip);
-                
-                u.history.push({ type: 'IP Бан (Админ)', text: `IP ${u.ip} забанен. Комментарий: ${reply}`, date: new Date().toISOString() });
-            } else {
-                u.history.push({ type: 'IP Бан (Отказ)', text: `Запрос на бан IP отклонен. Комментарий: ${reply}`, date: new Date().toISOString() });
-            }
-            u.ipBanRequest = null;
-            await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Запрос обработан');
-            loadAdminTab('ipban');
         }
 
         async function adminAnswer(userId, inputId, historyIndex) {
@@ -619,9 +605,7 @@
             if (!answer) return;
             const u = cachedUsers.find(x => x.id === userId);
             
-            // Удаляем оригинальный вопрос из истории
             u.history.splice(historyIndex, 1);
-            // Записываем ответ
             u.history.push({ type: 'Ответ поддержки', text: answer, date: new Date().toISOString() });
             
             await updateBin(BIN_USERS, { users: cachedUsers });
@@ -636,6 +620,7 @@
                 <div class="modal" onclick="if(event.target===this) closeModal()">
                     <div class="modal-content">
                         <h2>${u.name} (${u.id})</h2>
+                        <p style="margin-bottom:16px; color:var(--text-muted);">IP адрес: <strong>${u.ip || 'Неизвестен'}</strong></p>
                         
                         <h4>Стандартные роли:</h4>
                         <div style="margin-bottom:16px;">
@@ -644,21 +629,21 @@
                             <label style="display:block; margin-bottom:8px;"><input type="checkbox" id="role-responder" ${u.roles.questionResponder ? 'checked' : ''}> Ответчик</label>
                         </div>
 
-                        <h4>Кастомная роль (текстом):</h4>
-                        <input type="text" id="custom-role-input" placeholder="Например: Модератор чата" value="${u.roles.customRoles ? u.roles.customRoles.join(', ') : ''}">
+                        <h4>Кастомная роль:</h4>
+                        <input type="text" id="custom-role-input" placeholder="Например: Модератор" value="${u.roles.customRoles ? u.roles.customRoles.join(', ') : ''}">
 
                         <h4>Действия:</h4>
                         <div style="display:flex; flex-direction:column; gap:10px;">
                             ${u.banned ? `
-                                <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить досрочно</button>
+                                <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить (снять обычный бан)</button>
                             ` : `
                                 <button class="btn btn-sm btn-danger" onclick="adminBan('${u.id}')">Забанить (обычный бан)</button>
                             `}
-                            <button class="btn btn-sm btn-danger" onclick="requestIPBan('${u.id}')">Забанить по IP (запрос)</button>
+                            <button class="btn btn-sm btn-danger" onclick="adminBanIPDirect('${u.id}')">Забанить навсегда по IP (${u.ip})</button>
                         </div>
 
                         <div style="margin-top:24px; display:flex; gap:10px;">
-                            <button class="btn" onclick="saveRoles('${u.id}')">Сохранить</button>
+                            <button class="btn" onclick="saveRoles('${u.id}')">Сохранить роли</button>
                             <button class="btn btn-outline" onclick="closeModal()">Закрыть</button>
                         </div>
                     </div>
@@ -674,9 +659,7 @@
             const custom = document.getElementById('custom-role-input').value;
             
             u.roles = { 
-                punisher: p, 
-                appealReviewer: r, 
-                questionResponder: res,
+                punisher: p, appealReviewer: r, questionResponder: res,
                 customRoles: custom ? custom.split(',').map(s => s.trim()).filter(Boolean) : []
             };
             u.history.push({ type: 'Система', text: 'Изменены должности пользователя.', date: new Date().toISOString() });
@@ -694,12 +677,8 @@
             const until = new Date(); until.setDate(until.getDate() + parseInt(days));
             u.banned = true;
             u.ban = { 
-                reason, 
-                issuedAt: new Date().toISOString(), 
-                until: until.toISOString(), 
-                appealSubmitted: false, 
-                appealDenied: false,
-                bannedBy: "Главный Админ" 
+                reason, issuedAt: new Date().toISOString(), until: until.toISOString(), 
+                appealSubmitted: false, appealDenied: false, bannedBy: "Главный Админ" 
             };
             u.history.push({ type: 'Бан', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
@@ -715,16 +694,30 @@
             closeModal(); navigate('admin');
         }
 
-        async function requestIPBan(userId) {
+        // Прямой бан по IP из карточки пользователя
+        async function adminBanIPDirect(userId) {
             const u = cachedUsers.find(x => x.id === userId);
-            const comment = prompt('Комментарий к запросу на бан IP:');
-            u.ipBanRequest = {
-                status: 'pending',
-                requesterName: 'Главный Админ',
-                comment: comment
+            if (!u.ip || u.ip === 'unknown') return alert('Не удалось определить IP пользователя');
+            
+            const reason = prompt(`Причина бана по IP (${u.ip}):`, 'Мультиаккаунт / Обход блокировки');
+            if (!reason) return;
+
+            const admin = await getCurrentUser();
+            let ipRecord = cachedUsers.find(x => x.id === 'IP_BAN_LIST');
+            if (!ipRecord) { ipRecord = { id: 'IP_BAN_LIST', bannedIPs: {} }; cachedUsers.push(ipRecord); }
+            if (!ipRecord.bannedIPs) ipRecord.bannedIPs = {};
+
+            ipRecord.bannedIPs[u.ip] = {
+                reason: reason,
+                by: admin.name,
+                date: new Date().toISOString()
             };
+
+            u.banned = true;
+            u.history.push({ type: 'IP Бан', text: `Навсегда забанен по IP. Причина: ${reason}`, date: new Date().toISOString() });
+
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Запрос на IP-бан создан (одобрите его во вкладке "Бан по IP").');
+            alert('Пользователь и его IP забанены навсегда!');
             closeModal(); navigate('admin');
         }
 
@@ -841,7 +834,7 @@
                 u.banned = false;
                 u.history.push({ type: 'Апелляция (Помощник)', text: `РАЗБАНЕН. Ответ: ${replyText}`, date: new Date().toISOString() });
             } else {
-                u.ban.appealDenied = true; // Блокируем навсегда
+                u.ban.appealDenied = true;
                 u.history.push({ type: 'Апелляция (Помощник)', text: `ОТКАЗАНО. Ответ: ${replyText}`, date: new Date().toISOString() });
             }
             if(u.ban) u.ban.appealSubmitted = false;
@@ -861,33 +854,12 @@
             
             u.banned = true;
             u.ban = { 
-                reason, 
-                issuedAt: new Date().toISOString(), 
-                until: until.toISOString(), 
-                appealSubmitted: false, 
-                appealDenied: false,
-                bannedBy: `Главный Админ | by ${user.name}` // Формат из ТЗ
+                reason, issuedAt: new Date().toISOString(), until: until.toISOString(), 
+                appealSubmitted: false, appealDenied: false, bannedBy: `Главный Админ | by ${user.name}` 
             };
             u.history.push({ type: 'Бан (Помощник)', text: `Причина: ${reason}. Срок: ${days} дн.`, date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
             alert('Пользователь забанен');
-            navigate('helper');
-        }
-
-        async function requestHelperIPBan(userId) {
-            const user = await getCurrentUser();
-            const comment = prompt('Причина для запроса IP-бана:');
-            if (!comment) return;
-            
-            const u = cachedUsers.find(x => x.id === userId);
-            u.ipBanRequest = {
-                status: 'pending',
-                requesterName: user.name,
-                comment: comment
-            };
-            u.history.push({ type: 'Запрос IP-бана', text: `Запрос отправлен Главному Админу. Причина: ${comment}`, date: new Date().toISOString() });
-            await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Запрос на IP-бан отправлен Главному Админу!');
             navigate('helper');
         }
 
