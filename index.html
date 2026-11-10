@@ -613,14 +613,24 @@
             loadAdminTab('questions');
         }
 
+        // === ОБНОВЛЕННОЕ МОДАЛЬНОЕ ОКНО (С РУЧНЫМ ВВОДОМ IP) ===
         function openAdminModal(userId) {
             const u = cachedUsers.find(x => x.id === userId);
             const modal = document.getElementById('modal-container');
+            
+            const ipText = (u.ip && u.ip !== 'unknown') ? u.ip : 'Не определен';
+            const manualIpInput = (!u.ip || u.ip === 'unknown') ? `
+                <div style="margin-top:10px; padding:10px; background:rgba(255,71,87,0.1); border-radius:4px;">
+                    <p style="color:var(--danger); font-size:0.85rem; margin-bottom:8px;">IP не определился автоматически. Введите его вручную:</p>
+                    <input type="text" id="manual-ip-input" placeholder="Введите IP (например, 192.168.1.1)">
+                </div>
+            ` : '';
+
             modal.innerHTML = `
                 <div class="modal" onclick="if(event.target===this) closeModal()">
                     <div class="modal-content">
                         <h2>${u.name} (${u.id})</h2>
-                        <p style="margin-bottom:16px; color:var(--text-muted);">IP адрес: <strong>${u.ip || 'Неизвестен'}</strong></p>
+                        <p style="margin-bottom:16px; color:var(--text-muted);">IP адрес: <strong>${ipText}</strong></p>
                         
                         <h4>Стандартные роли:</h4>
                         <div style="margin-bottom:16px;">
@@ -639,7 +649,9 @@
                             ` : `
                                 <button class="btn btn-sm btn-danger" onclick="adminBan('${u.id}')">Забанить (обычный бан)</button>
                             `}
-                            <button class="btn btn-sm btn-danger" onclick="adminBanIPDirect('${u.id}')">Забанить навсегда по IP (${u.ip})</button>
+                            
+                            ${manualIpInput}
+                            <button class="btn btn-sm btn-danger" onclick="adminBanIPDirect('${u.id}')">Забанить навсегда по IP</button>
                         </div>
 
                         <div style="margin-top:24px; display:flex; gap:10px;">
@@ -694,12 +706,21 @@
             closeModal(); navigate('admin');
         }
 
-        // Прямой бан по IP из карточки пользователя
+        // === ОБНОВЛЕННЫЙ БАН ПО IP (С ПРОВЕРКОЙ РУЧНОГО ВВОДА) ===
         async function adminBanIPDirect(userId) {
             const u = cachedUsers.find(x => x.id === userId);
-            if (!u.ip || u.ip === 'unknown') return alert('Не удалось определить IP пользователя');
             
-            const reason = prompt(`Причина бана по IP (${u.ip}):`, 'Мультиаккаунт / Обход блокировки');
+            let targetIp = u.ip;
+            if (!targetIp || targetIp === 'unknown') {
+                const manualInput = document.getElementById('manual-ip-input');
+                if (manualInput && manualInput.value.trim() !== '') {
+                    targetIp = manualInput.value.trim();
+                } else {
+                    return alert('IP-адрес неизвестен. Пожалуйста, введите его вручную в поле выше.');
+                }
+            }
+            
+            const reason = prompt(`Причина бана по IP (${targetIp}):`, 'Мультиаккаунт / Обход блокировки');
             if (!reason) return;
 
             const admin = await getCurrentUser();
@@ -707,14 +728,14 @@
             if (!ipRecord) { ipRecord = { id: 'IP_BAN_LIST', bannedIPs: {} }; cachedUsers.push(ipRecord); }
             if (!ipRecord.bannedIPs) ipRecord.bannedIPs = {};
 
-            ipRecord.bannedIPs[u.ip] = {
+            ipRecord.bannedIPs[targetIp] = {
                 reason: reason,
                 by: admin.name,
                 date: new Date().toISOString()
             };
 
             u.banned = true;
-            u.history.push({ type: 'IP Бан', text: `Навсегда забанен по IP. Причина: ${reason}`, date: new Date().toISOString() });
+            u.history.push({ type: 'IP Бан', text: `Навсегда забанен по IP (${targetIp}). Причина: ${reason}`, date: new Date().toISOString() });
 
             await updateBin(BIN_USERS, { users: cachedUsers });
             alert('Пользователь и его IP забанены навсегда!');
@@ -807,7 +828,7 @@
                             <p style="font-size:0.8rem; color:var(--text-muted)">${new Date(q.date).toLocaleString()} | От: ${q.userName}</p>
                             <p style="margin:10px 0; font-size:1.1rem;">"${q.text}"</p>
                             <textarea id="ans-${q.uniqueId}" placeholder="Ваш ответ..."></textarea>
-                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-${q.uniqueId}', ${q.uniqueId.split('-')[1]})">Ответить</button>
+                            <button class="btn btn-sm" onclick="helperAnswer('${q.userId}', 'ans-${q.uniqueId}', ${q.uniqueId.split('-')[2]})">Ответить</button>
                         </div>
                     `).join('')}
                 `;
