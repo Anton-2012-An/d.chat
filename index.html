@@ -392,21 +392,31 @@
             else if (tab === 'banned') {
                 const banned = users.filter(u => u.banned);
                 content.innerHTML = `
-                    <h2>Список наказанных</h2>
+                    <h2>Список наказанных и апелляции</h2>
                     ${banned.length === 0 ? '<p>Забаненных нет.</p>' : `
-                    <table>
-                        <tr><th>ID</th><th>Имя</th><th>Причина</th><th>До</th><th>Апелляция</th><th>Действия</th></tr>
+                    <div style="display:flex; flex-direction:column; gap:16px;">
                         ${banned.map(u => `
-                            <tr>
-                                <td>${u.id}</td>
-                                <td>${u.name}</td>
-                                <td>${u.ban.reason}</td>
-                                <td>${new Date(u.ban.until).toLocaleString()}</td>
-                                <td>${u.ban.appealSubmitted ? '<span style="color:var(--warning)">Ждет ответа</span>' : 'Нет'}</td>
-                                <td><button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить</button></td>
-                            </tr>
+                            <div class="card">
+                                <p><strong>${u.name}</strong> (ID: ${u.id})</p>
+                                <p>Причина бана: ${u.ban.reason} | До: ${new Date(u.ban.until).toLocaleString()}</p>
+                                ${u.ban.appealSubmitted ? `
+                                    <div style="margin-top:16px; padding:16px; background:var(--bg); border-radius:var(--radius); border-left: 4px solid var(--warning);">
+                                        <p style="color:var(--warning); font-weight:600;">Апелляция пользователя:</p>
+                                        <p style="margin-bottom:12px;">"${u.ban.appealText}"</p>
+                                        <textarea id="admin-reply-${u.id}" placeholder="Напишите ответ (почему разбанили или отклонили)..."></textarea>
+                                        <div style="display:flex; gap:10px;">
+                                            <button class="btn btn-sm btn-outline" onclick="adminResolveAppeal('${u.id}', true)">Разбанить с ответом</button>
+                                            <button class="btn btn-sm btn-danger" onclick="adminResolveAppeal('${u.id}', false)">Отклонить с ответом</button>
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div style="margin-top:16px;">
+                                        <button class="btn btn-sm btn-outline" onclick="adminUnban('${u.id}')">Разбанить досрочно (без апелляции)</button>
+                                    </div>
+                                `}
+                            </div>
                         `).join('')}
-                    </table>`}
+                    </div>`}
                 `;
             }
             else if (tab === 'roles') {
@@ -475,6 +485,32 @@
                     `).join('')}
                 `;
             }
+        }
+
+        // === НОВАЯ ФУНКЦИЯ: РЕШЕНИЕ АПЕЛЛЯЦИИ АДМИНОМ ===
+        async function adminResolveAppeal(userId, isUnban) {
+            const replyText = document.getElementById(`admin-reply-${userId}`).value;
+            const u = cachedUsers.find(x => x.id === userId);
+            
+            if (isUnban) {
+                u.banned = false;
+                u.history.push({ 
+                    type: 'Апелляция (Админ)', 
+                    text: `Решение: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, 
+                    date: new Date().toISOString() 
+                });
+            } else {
+                u.history.push({ 
+                    type: 'Апелляция (Админ)', 
+                    text: `Решение: ОТКЛОНЕНО. Ответ: ${replyText || 'Без комментария'}`, 
+                    date: new Date().toISOString() 
+                });
+            }
+            if(u.ban) u.ban.appealSubmitted = false;
+            
+            await updateBin(BIN_USERS, { users: cachedUsers });
+            alert('Решение по апелляции принято и записано в историю!');
+            navigate('admin');
         }
 
         async function adminAnswer(userId, inputId) {
@@ -550,7 +586,7 @@
             const u = cachedUsers.find(x => x.id === userId);
             u.banned = false;
             if(u.ban) u.ban.appealSubmitted = false;
-            u.history.push({ type: 'Разбан', text: 'Снят администратором досрочно.', date: new Date().toISOString() });
+            u.history.push({ type: 'Разбан', text: 'Снят администратором досрочно (без апелляции).', date: new Date().toISOString() });
             await updateBin(BIN_USERS, { users: cachedUsers });
             closeModal(); navigate('admin');
         }
@@ -594,9 +630,10 @@
                         <div class="card">
                             <p><strong>${u.name}</strong> (ID: ${u.id})</p>
                             <p>Причина бана: ${u.ban.reason}</p>
-                            <p style="margin:10px 0; color:var(--warning)">"${u.ban.appealText}"</p>
-                            <button class="btn btn-sm btn-outline" onclick="helperResolveAppeal('${u.id}', true)">Разбанить</button>
-                            <button class="btn btn-sm btn-danger" onclick="helperResolveAppeal('${u.id}', false)">Отклонить</button>
+                            <p style="margin:10px 0; color:var(--warning)">Апелляция: "${u.ban.appealText}"</p>
+                            <textarea id="helper-reply-${u.id}" placeholder="Ответ пользователю..."></textarea>
+                            <button class="btn btn-sm btn-outline" onclick="helperResolveAppeal('${u.id}', true)">Разбанить (с ответом)</button>
+                            <button class="btn btn-sm btn-danger" onclick="helperResolveAppeal('${u.id}', false)">Отклонить (с ответом)</button>
                         </div>
                     `).join('')}
                 `;
@@ -653,17 +690,29 @@
             navigate('helper');
         }
 
+        // === НОВАЯ ФУНКЦИЯ: РЕШЕНИЕ АПЕЛЛЯЦИИ ПОМОЩНИКОМ ===
         async function helperResolveAppeal(userId, isUnban) {
+            const replyText = document.getElementById(`helper-reply-${userId}`).value;
             const u = cachedUsers.find(x => x.id === userId);
+            
             if (isUnban) {
                 u.banned = false;
-                u.history.push({ type: 'Апелляция (Помощник)', text: 'Одобрено. Пользователь разбанен.', date: new Date().toISOString() });
+                u.history.push({ 
+                    type: 'Апелляция (Помощник)', 
+                    text: `Решение: РАЗБАНЕН. Ответ: ${replyText || 'Без комментария'}`, 
+                    date: new Date().toISOString() 
+                });
             } else {
-                u.history.push({ type: 'Апелляция (Помощник)', text: 'Отклонено. Бан оставлен в силе.', date: new Date().toISOString() });
+                u.history.push({ 
+                    type: 'Апелляция (Помощник)', 
+                    text: `Решение: ОТКЛОНЕНО. Ответ: ${replyText || 'Без комментария'}`, 
+                    date: new Date().toISOString() 
+                });
             }
             if(u.ban) u.ban.appealSubmitted = false;
+            
             await updateBin(BIN_USERS, { users: cachedUsers });
-            alert('Решение принято');
+            alert('Решение принято!');
             navigate('helper');
         }
 
